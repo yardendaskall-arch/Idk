@@ -275,7 +275,12 @@
         ctx.fillStyle = i === 0 ? '#4ecca3' : `rgba(78,204,163,${alpha})`;
         const pad = i === 0 ? 1 : 2;
         ctx.beginPath();
-        ctx.roundRect(seg.x * CELL + pad, seg.y * CELL + pad, CELL - pad * 2, CELL - pad * 2, 4);
+        const rx = seg.x * CELL + pad, ry = seg.y * CELL + pad, rw = CELL - pad * 2, rh = CELL - pad * 2, rr = 4;
+        if (ctx.roundRect) {
+          ctx.roundRect(rx, ry, rw, rh, rr);
+        } else {
+          ctx.rect(rx, ry, rw, rh);
+        }
         ctx.fill();
         ctx.restore();
       });
