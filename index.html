@@ -160,7 +160,14 @@
       placeFood();
       updateScore();
       draw();
-      setMessage('Press <span>START</span> to play');
+      setMessage('Starting in <span id="countdown">5</span>...');
+      let t = 5;
+      const cd = setInterval(() => {
+        t--;
+        const el = document.getElementById('countdown');
+        if (el) el.textContent = t;
+        if (t <= 0) { clearInterval(cd); if (state === 'idle') start(); }
+      }, 1000);
     }
 
     function placeFood() {
