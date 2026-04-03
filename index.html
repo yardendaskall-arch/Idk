@@ -104,10 +104,8 @@
       -webkit-tap-highlight-color: transparent;
     }
 
-    @media (pointer: coarse) {
-      #dpad { display: flex; }
-      #btn-start { display: block; }
-    }
+    #dpad { display: flex; }
+    #btn-start { display: block; }
   </style>
 </head>
 <body>
@@ -117,7 +115,7 @@
     <div>BEST: <span id="high-val">0</span></div>
   </div>
   <canvas id="canvas"></canvas>
-  <div id="message">Tap <span>START</span> to play</div>
+  <div id="message">Press <span>START</span> to play</div>
 
   <div id="dpad">
     <div class="dpad-btn" id="btn-up">▲</div>
@@ -162,8 +160,7 @@
       placeFood();
       updateScore();
       draw();
-      const isMobile = window.matchMedia('(pointer: coarse)').matches;
-      setMessage(isMobile ? 'Tap <span>START</span> to play' : 'Press <span>SPACE</span> or <span>ENTER</span> to start');
+      setMessage('Press <span>START</span> to play');
     }
 
     function placeFood() {
