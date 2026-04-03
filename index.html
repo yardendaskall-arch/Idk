@@ -130,8 +130,12 @@
     const canvas = document.getElementById('canvas');
     const ctx = canvas.getContext('2d');
 
-    // Responsive canvas sizing
     const CELL = 20;
+    let snake, dir, nextDir, food, score, highScore, state, interval, speed, countdownTimer;
+
+    function COLS() { return canvas.width / CELL; }
+    function ROWS() { return canvas.height / CELL; }
+
     function resize() {
       const maxW = Math.min(window.innerWidth - 16, window.innerHeight * 0.55, 400);
       const size = Math.floor(maxW / CELL) * CELL;
@@ -141,11 +145,6 @@
     }
     resize();
     window.addEventListener('resize', resize);
-
-    function COLS() { return canvas.width / CELL; }
-    function ROWS() { return canvas.height / CELL; }
-
-    let snake, dir, nextDir, food, score, highScore, state, interval, speed, countdownTimer;
 
     function init() {
       const cx = Math.floor(COLS() / 2);
