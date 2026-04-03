@@ -137,7 +137,7 @@
       const size = Math.floor(maxW / CELL) * CELL;
       canvas.width = size;
       canvas.height = size;
-      if (typeof draw === 'function') draw();
+      if (food) draw();
     }
     resize();
     window.addEventListener('resize', resize);
