@@ -145,7 +145,7 @@
     function COLS() { return canvas.width / CELL; }
     function ROWS() { return canvas.height / CELL; }
 
-    let snake, dir, nextDir, food, score, highScore, state, interval, speed;
+    let snake, dir, nextDir, food, score, highScore, state, interval, speed, countdownTimer;
 
     function init() {
       const cx = Math.floor(COLS() / 2);
@@ -160,13 +160,17 @@
       placeFood();
       updateScore();
       draw();
-      setMessage('Starting in <span id="countdown">5</span>...');
+      clearInterval(countdownTimer);
       let t = 5;
-      const cd = setInterval(() => {
+      setMessage('Starting in <span>' + t + '</span>...');
+      countdownTimer = setInterval(() => {
         t--;
-        const el = document.getElementById('countdown');
-        if (el) el.textContent = t;
-        if (t <= 0) { clearInterval(cd); if (state === 'idle') start(); }
+        if (t > 0) {
+          setMessage('Starting in <span>' + t + '</span>...');
+        } else {
+          clearInterval(countdownTimer);
+          if (state === 'idle') start();
+        }
       }, 1000);
     }
 
@@ -180,6 +184,7 @@
 
     function start() {
       if (state === 'running') return;
+      clearInterval(countdownTimer);
       if (state === 'dead') init();
       state = 'running';
       clearInterval(interval);
