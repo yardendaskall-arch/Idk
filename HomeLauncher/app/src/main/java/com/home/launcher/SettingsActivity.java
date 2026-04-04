@@ -1,6 +1,8 @@
 package com.home.launcher;
 
 import android.app.Activity;
+import android.app.WallpaperManager;
+import android.content.Intent;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Bundle;
@@ -39,7 +41,6 @@ public class SettingsActivity extends Activity {
     }
 
     private void buildUI() {
-        // Root scroll with dark gradient bg
         ScrollView scroll = new ScrollView(this);
         int[] bg = SettingsManager.BG_PRESETS[sm.getBgPreset()];
         GradientDrawable rootBg = new GradientDrawable(
@@ -80,7 +81,6 @@ public class SettingsActivity extends Activity {
 
         // ── LAYOUT card ─────────────────────────────────────────────────
         LinearLayout layoutCard = startCard();
-
         addSectionLabel(layoutCard, "Layout");
 
         addSeekRow(layoutCard, "Grid columns", 2, 5, sm.getColumns() - 2,
@@ -151,14 +151,54 @@ public class SettingsActivity extends Activity {
 
         root.addView(searchCard);
 
+        // ── DOCK card ───────────────────────────────────────────────────
+        LinearLayout dockCard = startCard();
+        addSectionLabel(dockCard, "Dock");
+
+        addToggle(dockCard, "Show dock bar", sm.dockEnabled(),
+            new CompoundButton.OnCheckedChangeListener() {
+                public void onCheckedChanged(CompoundButton b, boolean c) { sm.set(SettingsManager.KEY_DOCK_ENABLED, c); }});
+
+        addDivider(dockCard);
+        addInfoRow(dockCard, "Dock apps", "Auto-detected: Phone, Messages, Camera, Browser");
+
+        root.addView(dockCard);
+
+        // ── WALLPAPER card ──────────────────────────────────────────────
+        LinearLayout wpCard = startCard();
+        addSectionLabel(wpCard, "Wallpaper");
+
+        addToggle(wpCard, "Use system wallpaper", sm.useSystemWallpaper(),
+            new CompoundButton.OnCheckedChangeListener() {
+                public void onCheckedChanged(CompoundButton b, boolean c) { sm.set(SettingsManager.KEY_USE_SYSTEM_WP, c); }});
+
+        addDivider(wpCard);
+
+        int dimPct = sm.getWpDim();
+        // convert 0-100 to seekbar 0-10 (steps of 10)
+        addSeekRow(wpCard, "Background dim", 0, 10, dimPct / 10,
+            new int[]{0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100},
+            new SeekCallback() { public void onValue(int v) { sm.set(SettingsManager.KEY_WP_DIM, v * 10); }});
+
+        addDivider(wpCard);
+        addSubLabel(wpCard, "System wallpaper");
+        addActionButton(wpCard, "Change Wallpaper", new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                Intent intent = new Intent(Intent.ACTION_SET_WALLPAPER);
+                startActivity(Intent.createChooser(intent, "Select Wallpaper"));
+            }
+        });
+
+        addDivider(wpCard);
+        addSubLabel(wpCard, "Gradient background theme");
+        wpCard.addView(makeBgPresetPicker());
+
+        root.addView(wpCard);
+
         // ── APPEARANCE card ─────────────────────────────────────────────
         LinearLayout appearCard = startCard();
         addSectionLabel(appearCard, "Appearance");
 
-        addSubLabel(appearCard, "Background");
-        appearCard.addView(makeBgPresetPicker());
-
-        addDivider(appearCard);
         addSubLabel(appearCard, "Accent color");
         appearCard.addView(makeAccentPicker());
 
@@ -167,6 +207,16 @@ public class SettingsActivity extends Activity {
         appearCard.addView(makeIconShapePicker());
 
         root.addView(appearCard);
+
+        // ── ABOUT card ──────────────────────────────────────────────────
+        LinearLayout aboutCard = startCard();
+        addSectionLabel(aboutCard, "About");
+        addInfoRow(aboutCard, "Home Launcher", "Custom home screen");
+        addDivider(aboutCard);
+        addInfoRow(aboutCard, "Version", "1.0");
+        addDivider(aboutCard);
+        addInfoRow(aboutCard, "Package", "com.home.launcher");
+        root.addView(aboutCard);
 
         scroll.addView(root);
         setContentView(scroll);
@@ -220,6 +270,53 @@ public class SettingsActivity extends Activity {
         lp.setMargins(dp(16), 0, dp(16), 0);
         v.setLayoutParams(lp);
         parent.addView(v);
+    }
+
+    private void addInfoRow(LinearLayout parent, String label, String value) {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setPadding(dp(16), dp(13), dp(16), dp(13));
+
+        TextView lv = new TextView(this);
+        lv.setText(label);
+        lv.setTextColor(0xEEFFFFFF);
+        lv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
+        lv.setLayoutParams(new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+
+        TextView rv = new TextView(this);
+        rv.setText(value);
+        rv.setTextColor(0x66FFFFFF);
+        rv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
+        rv.setGravity(Gravity.END);
+
+        row.addView(lv);
+        row.addView(rv);
+        parent.addView(row);
+    }
+
+    private void addActionButton(LinearLayout parent, String label, View.OnClickListener listener) {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setPadding(dp(16), dp(10), dp(16), dp(10));
+
+        TextView btn = new TextView(this);
+        btn.setText(label);
+        btn.setTextColor(0xFF000000);
+        btn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
+        btn.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
+        btn.setGravity(Gravity.CENTER);
+        btn.setPadding(dp(20), dp(10), dp(20), dp(10));
+
+        GradientDrawable bg = new GradientDrawable();
+        bg.setColor(accent);
+        bg.setCornerRadius(dp(24));
+        btn.setBackground(bg);
+        btn.setOnClickListener(listener);
+
+        row.addView(btn);
+        parent.addView(row);
     }
 
     // ─── Row builders ──────────────────────────────────────────────────
@@ -351,9 +448,8 @@ public class SettingsActivity extends Activity {
         row.setOrientation(LinearLayout.HORIZONTAL);
 
         final int current = sm.getBgPreset();
-        final String[] names = {"Night", "Ocean", "Navy", "Midnight",
-                                "Emerald", "Steel", "Teal", "Charcoal"};
         final View[] circles = new View[SettingsManager.BG_PRESETS.length];
+        final TextView[] nameViews = new TextView[SettingsManager.BG_PRESETS.length];
 
         for (int i = 0; i < SettingsManager.BG_PRESETS.length; i++) {
             final int idx = i;
@@ -363,25 +459,25 @@ public class SettingsActivity extends Activity {
             cell.setPadding(dp(6), 0, dp(6), 0);
 
             View circle = new View(this);
-            int size = dp(56);
+            int size = dp(52);
             circle.setLayoutParams(new LinearLayout.LayoutParams(size, size));
 
             GradientDrawable gd = new GradientDrawable(
                 GradientDrawable.Orientation.TL_BR,
                 new int[]{SettingsManager.BG_PRESETS[i][0], SettingsManager.BG_PRESETS[i][1]});
-            gd.setCornerRadius(dp(28));
+            gd.setCornerRadius(dp(26));
             if (i == current) gd.setStroke(dp(3), accent);
             circle.setBackground(gd);
             circles[i] = circle;
 
             TextView name = new TextView(this);
-            name.setText(names[i]);
+            name.setText(SettingsManager.BG_NAMES[i]);
             name.setTextColor(i == current ? accent : 0x66FFFFFF);
             name.setTextSize(TypedValue.COMPLEX_UNIT_SP, 9);
             name.setGravity(Gravity.CENTER);
             name.setPadding(0, dp(4), 0, 0);
+            nameViews[i] = name;
 
-            final TextView nameRef = name;
             circle.setOnClickListener(new View.OnClickListener() {
                 @Override public void onClick(View v) {
                     sm.set(SettingsManager.KEY_BG_PRESET, idx);
@@ -389,9 +485,10 @@ public class SettingsActivity extends Activity {
                         GradientDrawable d = new GradientDrawable(
                             GradientDrawable.Orientation.TL_BR,
                             new int[]{SettingsManager.BG_PRESETS[j][0], SettingsManager.BG_PRESETS[j][1]});
-                        d.setCornerRadius(dp(28));
+                        d.setCornerRadius(dp(26));
                         if (j == idx) d.setStroke(dp(3), accent);
                         circles[j].setBackground(d);
+                        nameViews[j].setTextColor(j == idx ? accent : 0x66FFFFFF);
                     }
                 }
             });
@@ -455,11 +552,10 @@ public class SettingsActivity extends Activity {
         String[] labels = {"Circle", "Rounded", "Square"};
         final int current = sm.getIconShape();
         final TextView[] btns = new TextView[3];
-        float[] radii = {dp(24), dp(10), dp(4)};
+        final float[] radii = {dp(24), dp(10), dp(4)};
 
         for (int i = 0; i < 3; i++) {
             final int idx = i;
-            final float[] radiiRef = radii;
             TextView btn = new TextView(this);
             btn.setText(labels[i]);
             btn.setGravity(Gravity.CENTER);
@@ -482,7 +578,7 @@ public class SettingsActivity extends Activity {
                     sm.set(SettingsManager.KEY_ICON_SHAPE, idx);
                     for (int j = 0; j < btns.length; j++) {
                         GradientDrawable d = new GradientDrawable();
-                        d.setCornerRadius(radiiRef[j]);
+                        d.setCornerRadius(radii[j]);
                         d.setColor(j == idx ? accent : 0x22FFFFFF);
                         btns[j].setBackground(d);
                         btns[j].setTextColor(j == idx ? 0xFF000000 : 0xCCFFFFFF);
