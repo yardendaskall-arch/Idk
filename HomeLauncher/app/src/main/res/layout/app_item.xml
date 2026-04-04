@@ -4,13 +4,15 @@
     android:layout_height="wrap_content"
     android:orientation="vertical"
     android:gravity="center"
-    android:padding="8dp">
+    android:padding="6dp"
+    android:background="@drawable/app_item_bg">
 
     <ImageView
         android:id="@+id/app_icon"
         android:layout_width="56dp"
         android:layout_height="56dp"
-        android:scaleType="fitCenter" />
+        android:scaleType="fitCenter"
+        android:padding="4dp" />
 
     <TextView
         android:id="@+id/app_label"
@@ -21,6 +23,6 @@
         android:textSize="11sp"
         android:maxLines="2"
         android:ellipsize="end"
-        android:layout_marginTop="4dp" />
+        android:layout_marginTop="5dp" />
 
 </LinearLayout>

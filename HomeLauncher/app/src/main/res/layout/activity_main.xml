@@ -3,35 +3,105 @@
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:orientation="vertical"
-    android:background="@color/background">
+    android:background="@drawable/bg_gradient">
 
+    <!-- Clock Section -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="2.2"
+        android:orientation="vertical"
+        android:gravity="center"
+        android:paddingTop="48dp"
+        android:paddingBottom="8dp">
+
+        <TextView
+            android:id="@+id/clock"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="00:00"
+            android:textColor="@color/white"
+            android:textSize="80sp"
+            android:textStyle="bold"
+            android:fontFamily="sans-serif-light"
+            android:letterSpacing="0.05" />
+
+        <TextView
+            android:id="@+id/date"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Monday, January 1"
+            android:textColor="@color/white_70"
+            android:textSize="16sp"
+            android:layout_marginTop="4dp"
+            android:letterSpacing="0.08" />
+
+    </LinearLayout>
+
+    <!-- Search Bar -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:orientation="horizontal"
-        android:gravity="center_vertical"
-        android:padding="16dp"
-        android:background="@color/header_bg">
+        android:paddingLeft="20dp"
+        android:paddingRight="20dp"
+        android:paddingBottom="12dp"
+        android:orientation="vertical">
 
         <TextView
-            android:layout_width="0dp"
+            android:id="@+id/app_count"
+            android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:text="@string/app_name"
-            android:textColor="@color/white"
-            android:textSize="22sp"
-            android:textStyle="bold" />
+            android:text="0 apps"
+            android:textColor="@color/white_50"
+            android:textSize="12sp"
+            android:layout_marginBottom="8dp"
+            android:layout_marginLeft="4dp" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="48dp"
+            android:background="@drawable/search_bg"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:paddingLeft="16dp"
+            android:paddingRight="16dp">
+
+            <ImageView
+                android:layout_width="20dp"
+                android:layout_height="20dp"
+                android:src="@drawable/ic_search"
+                android:layout_marginRight="10dp" />
+
+            <EditText
+                android:id="@+id/search_bar"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:background="@null"
+                android:hint="Search apps..."
+                android:textColor="@color/white"
+                android:textColorHint="@color/white_50"
+                android:textSize="15sp"
+                android:singleLine="true"
+                android:inputType="text"
+                android:imeOptions="actionSearch" />
+
+        </LinearLayout>
     </LinearLayout>
 
+    <!-- App Grid -->
     <GridView
         android:id="@+id/app_grid"
         android:layout_width="match_parent"
-        android:layout_height="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="5"
         android:numColumns="4"
-        android:verticalSpacing="16dp"
-        android:horizontalSpacing="8dp"
-        android:padding="12dp"
+        android:verticalSpacing="8dp"
+        android:horizontalSpacing="4dp"
+        android:paddingLeft="8dp"
+        android:paddingRight="8dp"
+        android:paddingBottom="16dp"
         android:stretchMode="columnWidth"
-        android:gravity="center" />
+        android:scrollbarStyle="outsideOverlay"
+        android:fadingEdge="none" />
 
 </LinearLayout>
