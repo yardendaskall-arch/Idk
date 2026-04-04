@@ -10,20 +10,22 @@ import android.content.IntentFilter;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
 import android.graphics.Bitmap;
-import android.net.Uri;
-import android.provider.Settings;
 import android.graphics.Canvas;
+import android.graphics.Color;
 import android.graphics.Paint;
 import android.graphics.Path;
 import android.graphics.PorterDuff;
 import android.graphics.PorterDuffXfermode;
 import android.graphics.Rect;
 import android.graphics.RectF;
+import android.graphics.Typeface;
 import android.graphics.drawable.BitmapDrawable;
 import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
+import android.net.Uri;
 import android.os.Bundle;
 import android.os.Handler;
+import android.provider.Settings;
 import android.text.Editable;
 import android.text.TextUtils;
 import android.text.TextWatcher;
@@ -36,6 +38,7 @@ import android.view.Window;
 import android.view.WindowManager;
 import android.widget.BaseAdapter;
 import android.widget.EditText;
+import android.widget.FrameLayout;
 import android.widget.GridView;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
@@ -53,8 +56,9 @@ import java.util.Locale;
 
 public class MainActivity extends Activity {
 
-    private LinearLayout rootLayout;
-    private TextView clockView, dateView, appCountView;
+    private FrameLayout rootFrame;
+    private LinearLayout contentLayout;
+    private TextView clockView, dateView;
     private EditText searchBar;
     private GridView appGrid;
 
@@ -68,8 +72,7 @@ public class MainActivity extends Activity {
     private float touchDownY;
 
     private BroadcastReceiver timeReceiver = new BroadcastReceiver() {
-        @Override
-        public void onReceive(Context context, Intent intent) { updateClock(); }
+        @Override public void onReceive(Context ctx, Intent i) { updateClock(); }
     };
 
     @Override
@@ -80,7 +83,9 @@ public class MainActivity extends Activity {
             WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
             WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN);
         getWindow().getDecorView().setSystemUiVisibility(
-            View.SYSTEM_UI_FLAG_LAYOUT_STABLE | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN);
+            View.SYSTEM_UI_FLAG_LAYOUT_STABLE |
+            View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN |
+            View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION);
         sm = new SettingsManager(this);
         buildUI();
     }
@@ -106,7 +111,7 @@ public class MainActivity extends Activity {
     public boolean onTouchEvent(MotionEvent e) {
         if (e.getAction() == MotionEvent.ACTION_DOWN) touchDownY = e.getY();
         if (e.getAction() == MotionEvent.ACTION_UP) {
-            if ((e.getY() - touchDownY) > dp(70) && touchDownY < dp(100)) expandNotifications();
+            if ((e.getY() - touchDownY) > dp(60) && touchDownY < dp(120)) expandNotifications();
         }
         return super.onTouchEvent(e);
     }
@@ -120,108 +125,125 @@ public class MainActivity extends Activity {
         } catch (Exception ignored) {}
     }
 
+    // ─── UI Construction ───────────────────────────────────────────────
+
     private void buildUI() {
-        rootLayout = new LinearLayout(this);
-        rootLayout.setOrientation(LinearLayout.VERTICAL);
-        applyBackground();
-        rootLayout.setOnLongClickListener(new View.OnLongClickListener() {
+        // Root frame (allows layering)
+        rootFrame = new FrameLayout(this);
+        applyBackground(rootFrame);
+
+        // Long press background → settings
+        rootFrame.setOnLongClickListener(new View.OnLongClickListener() {
             @Override public boolean onLongClick(View v) {
-                startActivity(new Intent(MainActivity.this, SettingsActivity.class));
+                openSettings();
                 return true;
             }
         });
 
-        LinearLayout clockSec = buildClockSection();
-        LinearLayout searchSec = buildSearchSection();
-        GridView grid = buildGrid();
+        // Content column
+        contentLayout = new LinearLayout(this);
+        contentLayout.setOrientation(LinearLayout.VERTICAL);
 
-        if (!sm.searchBottom()) {
-            rootLayout.addView(clockSec);
-            if (sm.showSearch()) rootLayout.addView(searchSec);
-            rootLayout.addView(grid);
-        } else {
-            rootLayout.addView(clockSec);
-            rootLayout.addView(grid);
-            if (sm.showSearch()) rootLayout.addView(searchSec);
-        }
+        // Build sections
+        View clockSec  = buildClockSection();
+        View searchSec = buildSearchSection();
+        GridView grid  = buildGrid();
 
-        setContentView(rootLayout);
+        boolean searchBottom = sm.searchBottom();
+        boolean showSearch   = sm.showSearch();
+
+        contentLayout.addView(clockSec);
+        if (showSearch && !searchBottom) contentLayout.addView(searchSec);
+        contentLayout.addView(grid);
+        if (showSearch && searchBottom)  contentLayout.addView(searchSec);
+
+        rootFrame.addView(contentLayout, new FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.MATCH_PARENT,
+            FrameLayout.LayoutParams.MATCH_PARENT));
+
+        setContentView(rootFrame);
         updateClock();
         loadApps();
     }
 
-    private void applyBackground() {
+    private void applyBackground(View v) {
         int[] bg = SettingsManager.BG_PRESETS[sm.getBgPreset()];
         GradientDrawable g = new GradientDrawable(
             GradientDrawable.Orientation.TL_BR, new int[]{bg[0], bg[1]});
-        rootLayout.setBackground(g);
+        v.setBackground(g);
     }
 
-    private LinearLayout buildClockSection() {
+    // ─── Clock ─────────────────────────────────────────────────────────
+
+    private View buildClockSection() {
         LinearLayout sec = new LinearLayout(this);
         sec.setOrientation(LinearLayout.VERTICAL);
-        sec.setGravity(Gravity.CENTER);
-        sec.setPadding(0, dp(52), 0, dp(8));
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        sec.setLayoutParams(lp);
+        sec.setGravity(Gravity.CENTER_HORIZONTAL);
+        // Status bar space + padding
+        sec.setPadding(dp(24), dp(60), dp(24), dp(16));
+        sec.setLayoutParams(new LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT,
+            ViewGroup.LayoutParams.WRAP_CONTENT));
         sec.setVisibility(sm.showClock() ? View.VISIBLE : View.GONE);
 
         clockView = new TextView(this);
         clockView.setTextColor(0xFFFFFFFF);
         clockView.setTextSize(TypedValue.COMPLEX_UNIT_SP, sm.getClockSizeSp());
-        clockView.setTypeface(null, android.graphics.Typeface.BOLD);
-        clockView.setLetterSpacing(0.04f);
+        clockView.setTypeface(Typeface.create("sans-serif-light", Typeface.NORMAL));
+        clockView.setLetterSpacing(-0.03f);
+        clockView.setShadowLayer(dp(8), 0, dp(2), 0x55000000);
 
         dateView = new TextView(this);
-        dateView.setTextColor(0xB3FFFFFF);
-        dateView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
-        dateView.setPadding(0, dp(4), 0, dp(16));
-        dateView.setLetterSpacing(0.06f);
+        dateView.setTextColor(0x99FFFFFF);
+        dateView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
+        dateView.setTypeface(Typeface.create("sans-serif", Typeface.NORMAL));
+        dateView.setLetterSpacing(0.08f);
+        dateView.setPadding(0, dp(2), 0, dp(4));
         dateView.setVisibility(sm.showDate() ? View.VISIBLE : View.GONE);
 
         sec.addView(clockView);
         sec.addView(dateView);
+        sec.addView(makeDivider());
         return sec;
     }
 
-    private LinearLayout buildSearchSection() {
+    // ─── Search ────────────────────────────────────────────────────────
+
+    private View buildSearchSection() {
         LinearLayout outer = new LinearLayout(this);
         outer.setOrientation(LinearLayout.VERTICAL);
-        outer.setPadding(dp(20), dp(6), dp(20), dp(10));
+        outer.setPadding(dp(16), dp(10), dp(16), dp(14));
         outer.setLayoutParams(new LinearLayout.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-
-        appCountView = new TextView(this);
-        appCountView.setTextColor(0x80FFFFFF);
-        appCountView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
-        appCountView.setPadding(dp(4), 0, 0, dp(6));
+            ViewGroup.LayoutParams.MATCH_PARENT,
+            ViewGroup.LayoutParams.WRAP_CONTENT));
 
         LinearLayout pill = new LinearLayout(this);
         pill.setOrientation(LinearLayout.HORIZONTAL);
         pill.setGravity(Gravity.CENTER_VERTICAL);
-        pill.setPadding(dp(14), 0, dp(14), 0);
+        pill.setPadding(dp(16), 0, dp(16), 0);
+
         GradientDrawable pillBg = new GradientDrawable();
-        pillBg.setCornerRadius(dp(23));
-        pillBg.setColor(0x33FFFFFF);
+        pillBg.setCornerRadius(dp(28));
+        pillBg.setColor(0x22FFFFFF);
+        pillBg.setStroke(dp(1), 0x33FFFFFF);
         pill.setBackground(pillBg);
         pill.setLayoutParams(new LinearLayout.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT, dp(46)));
+            ViewGroup.LayoutParams.MATCH_PARENT, dp(52)));
 
         TextView icon = new TextView(this);
         icon.setText("\uD83D\uDD0D");
-        icon.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
-        icon.setPadding(0, 0, dp(8), 0);
+        icon.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
+        icon.setPadding(0, 0, dp(10), 0);
 
         searchBar = new EditText(this);
-        searchBar.setHint("Search apps...");
+        searchBar.setHint("Search apps");
         searchBar.setTextColor(0xFFFFFFFF);
-        searchBar.setHintTextColor(0x80FFFFFF);
+        searchBar.setHintTextColor(0x66FFFFFF);
         searchBar.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
         searchBar.setBackground(null);
         searchBar.setSingleLine(true);
-        searchBar.setLayoutParams(new LinearLayout.LayoutParams(0,
-            ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        searchBar.setLayoutParams(new LinearLayout.LayoutParams(
+            0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
         searchBar.addTextChangedListener(new TextWatcher() {
             public void beforeTextChanged(CharSequence s, int a, int b, int c) {}
             public void afterTextChanged(Editable s) {}
@@ -230,10 +252,11 @@ public class MainActivity extends Activity {
 
         pill.addView(icon);
         pill.addView(searchBar);
-        outer.addView(appCountView);
         outer.addView(pill);
         return outer;
     }
+
+    // ─── Grid ──────────────────────────────────────────────────────────
 
     private GridView buildGrid() {
         appGrid = new GridView(this);
@@ -241,17 +264,24 @@ public class MainActivity extends Activity {
             ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f);
         appGrid.setLayoutParams(lp);
         appGrid.setNumColumns(sm.getColumns());
-        appGrid.setVerticalSpacing(dp(8));
+        appGrid.setVerticalSpacing(dp(4));
         appGrid.setHorizontalSpacing(dp(4));
-        appGrid.setPadding(dp(8), dp(4), dp(8), dp(16));
+        appGrid.setPadding(dp(6), dp(6), dp(6), dp(80));
+        appGrid.setClipToPadding(false);
         appGrid.setStretchMode(GridView.STRETCH_COLUMN_WIDTH);
         appGrid.setScrollbarFadingEnabled(true);
+        appGrid.setBackground(null);
         return appGrid;
     }
 
+    // ─── Clock ticking ─────────────────────────────────────────────────
+
     private void startClock() {
         clockRunnable = new Runnable() {
-            @Override public void run() { updateClock(); clockHandler.postDelayed(this, 1000); }
+            @Override public void run() {
+                updateClock();
+                clockHandler.postDelayed(this, 1000);
+            }
         };
         clockHandler.post(clockRunnable);
     }
@@ -265,34 +295,35 @@ public class MainActivity extends Activity {
         Date now = new Date();
         String fmt = sm.is24h()
             ? (sm.showSeconds() ? "HH:mm:ss" : "HH:mm")
-            : (sm.showSeconds() ? "hh:mm:ss a" : "hh:mm a");
+            : (sm.showSeconds() ? "h:mm:ss a" : "h:mm a");
         clockView.setText(new SimpleDateFormat(fmt, Locale.getDefault()).format(now));
         if (dateView != null && sm.showDate())
-            dateView.setText(new SimpleDateFormat("EEEE, MMMM d", Locale.getDefault()).format(now));
+            dateView.setText(new SimpleDateFormat("EEEE, MMMM d", Locale.getDefault())
+                .format(now).toUpperCase(Locale.getDefault()));
     }
+
+    // ─── App loading ───────────────────────────────────────────────────
 
     private void loadApps() {
         allApps.clear();
-        PackageManager pm = getPackageManager();
+        final PackageManager pm = getPackageManager();
         Intent intent = new Intent(Intent.ACTION_MAIN, null);
         intent.addCategory(Intent.CATEGORY_LAUNCHER);
         List<ResolveInfo> list = pm.queryIntentActivities(intent, 0);
-        final PackageManager pmRef = pm;
         Collections.sort(list, new Comparator<ResolveInfo>() {
             @Override public int compare(ResolveInfo a, ResolveInfo b) {
-                String la = a.loadLabel(pmRef).toString(), lb = b.loadLabel(pmRef).toString();
+                String la = a.loadLabel(pm).toString(), lb = b.loadLabel(pm).toString();
                 return sm.getSortOrder() == 0 ? la.compareToIgnoreCase(lb) : lb.compareToIgnoreCase(la);
             }
         });
         for (ResolveInfo ri : list) {
             AppInfo info = new AppInfo();
-            info.label = ri.loadLabel(pm).toString();
-            info.icon = ri.loadIcon(pm);
+            info.label       = ri.loadLabel(pm).toString();
+            info.icon        = ri.loadIcon(pm);
             info.packageName = ri.activityInfo.packageName;
-            info.activityName = ri.activityInfo.name;
+            info.activityName= ri.activityInfo.name;
             allApps.add(info);
         }
-        if (appCountView != null) appCountView.setText(allApps.size() + " apps");
         filterApps(searchBar != null ? searchBar.getText().toString() : "");
     }
 
@@ -303,16 +334,22 @@ public class MainActivity extends Activity {
         } else {
             String q = query.toLowerCase(Locale.getDefault());
             for (AppInfo a : allApps)
-                if (a.label.toLowerCase(Locale.getDefault()).contains(q)) filteredApps.add(a);
+                if (a.label.toLowerCase(Locale.getDefault()).contains(q))
+                    filteredApps.add(a);
         }
+
         if (adapter == null) {
             adapter = new AppAdapter();
             appGrid.setAdapter(adapter);
+
             appGrid.setOnItemClickListener(new android.widget.AdapterView.OnItemClickListener() {
-                @Override public void onItemClick(android.widget.AdapterView<?> p, final View v, int pos, long id) {
-                    v.animate().scaleX(0.82f).scaleY(0.82f).setDuration(90)
+                @Override public void onItemClick(android.widget.AdapterView<?> p, final View v,
+                                                  int pos, long id) {
+                    v.animate().scaleX(0.85f).scaleY(0.85f).setDuration(80)
                         .withEndAction(new Runnable() {
-                            @Override public void run() { v.animate().scaleX(1f).scaleY(1f).setDuration(110).start(); }
+                            @Override public void run() {
+                                v.animate().scaleX(1f).scaleY(1f).setDuration(120).start();
+                            }
                         }).start();
                     AppInfo app = filteredApps.get(pos);
                     Intent launch = new Intent(Intent.ACTION_MAIN);
@@ -320,54 +357,17 @@ public class MainActivity extends Activity {
                     launch.setClassName(app.packageName, app.activityName);
                     launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
                     try { startActivity(launch); }
-                    catch (Exception e) { Toast.makeText(MainActivity.this, "Can't open " + app.label, Toast.LENGTH_SHORT).show(); }
+                    catch (Exception e) {
+                        Toast.makeText(MainActivity.this, "Can't open " + app.label,
+                            Toast.LENGTH_SHORT).show();
+                    }
                 }
             });
+
             appGrid.setOnItemLongClickListener(new android.widget.AdapterView.OnItemLongClickListener() {
-                @Override public boolean onItemLongClick(android.widget.AdapterView<?> p, View v, int pos, long id) {
-                    final AppInfo app = filteredApps.get(pos);
-                    final String pkg = app.packageName;
-                    final boolean isSelf = pkg.equals(getPackageName());
-                    final String[] options = isSelf
-                        ? new String[]{"Open", "App Info", "Launcher Settings"}
-                        : new String[]{"Open", "App Info", "Uninstall", "Launcher Settings"};
-                    new AlertDialog.Builder(MainActivity.this)
-                        .setTitle(app.label)
-                        .setItems(options, new DialogInterface.OnClickListener() {
-                            @Override public void onClick(DialogInterface dialog, int which) {
-                                if (isSelf) {
-                                    if (which == 0) {
-                                        Intent launch = new Intent(Intent.ACTION_MAIN);
-                                        launch.addCategory(Intent.CATEGORY_LAUNCHER);
-                                        launch.setClassName(app.packageName, app.activityName);
-                                        launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-                                        try { startActivity(launch); } catch (Exception ignored) {}
-                                    } else if (which == 1) {
-                                        startActivity(new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
-                                            Uri.parse("package:" + pkg)));
-                                    } else if (which == 2) {
-                                        startActivity(new Intent(MainActivity.this, SettingsActivity.class));
-                                    }
-                                } else {
-                                    if (which == 0) {
-                                        Intent launch = new Intent(Intent.ACTION_MAIN);
-                                        launch.addCategory(Intent.CATEGORY_LAUNCHER);
-                                        launch.setClassName(app.packageName, app.activityName);
-                                        launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-                                        try { startActivity(launch); } catch (Exception ignored) {}
-                                    } else if (which == 1) {
-                                        startActivity(new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
-                                            Uri.parse("package:" + pkg)));
-                                    } else if (which == 2) {
-                                        startActivity(new Intent(Intent.ACTION_DELETE,
-                                            Uri.parse("package:" + pkg)));
-                                    } else if (which == 3) {
-                                        startActivity(new Intent(MainActivity.this, SettingsActivity.class));
-                                    }
-                                }
-                            }
-                        })
-                        .show();
+                @Override public boolean onItemLongClick(android.widget.AdapterView<?> p, View v,
+                                                        int pos, long id) {
+                    showAppMenu(filteredApps.get(pos));
                     return true;
                 }
             });
@@ -375,6 +375,42 @@ public class MainActivity extends Activity {
             adapter.notifyDataSetChanged();
         }
     }
+
+    private void showAppMenu(final AppInfo app) {
+        final String pkg = app.packageName;
+        final boolean isSelf = pkg.equals(getPackageName());
+        final String[] options = isSelf
+            ? new String[]{"Open", "App Info", "Launcher Settings"}
+            : new String[]{"Open", "App Info", "Uninstall", "Launcher Settings"};
+
+        new AlertDialog.Builder(this)
+            .setTitle(app.label)
+            .setItems(options, new DialogInterface.OnClickListener() {
+                @Override public void onClick(DialogInterface dialog, int which) {
+                    if (which == 0) {
+                        Intent launch = new Intent(Intent.ACTION_MAIN);
+                        launch.addCategory(Intent.CATEGORY_LAUNCHER);
+                        launch.setClassName(app.packageName, app.activityName);
+                        launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                        try { startActivity(launch); } catch (Exception ignored) {}
+                    } else if (which == 1) {
+                        startActivity(new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                            Uri.parse("package:" + pkg)));
+                    } else if (!isSelf && which == 2) {
+                        startActivity(new Intent(Intent.ACTION_DELETE, Uri.parse("package:" + pkg)));
+                    } else {
+                        openSettings();
+                    }
+                }
+            })
+            .show();
+    }
+
+    private void openSettings() {
+        startActivity(new Intent(this, SettingsActivity.class));
+    }
+
+    // ─── Icon rendering ────────────────────────────────────────────────
 
     static Bitmap shapedIcon(Drawable drawable, int sizePx, int shape) {
         Bitmap src = drawableToBitmap(drawable, sizePx);
@@ -408,14 +444,30 @@ public class MainActivity extends Activity {
         return b;
     }
 
-    private int dp(int dp) { return Math.round(dp * getResources().getDisplayMetrics().density); }
+    private View makeDivider() {
+        View v = new View(this);
+        v.setBackgroundColor(0x18FFFFFF);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, 1);
+        lp.setMargins(dp(32), dp(4), dp(32), 0);
+        v.setLayoutParams(lp);
+        return v;
+    }
+
+    private int dp(int dp) {
+        return Math.round(dp * getResources().getDisplayMetrics().density);
+    }
+
+    // ─── Data model ────────────────────────────────────────────────────
 
     static class AppInfo { String label, packageName, activityName; Drawable icon; }
 
+    // ─── Adapter ───────────────────────────────────────────────────────
+
     class AppAdapter extends BaseAdapter {
-        @Override public int getCount() { return filteredApps.size(); }
-        @Override public Object getItem(int p) { return filteredApps.get(p); }
-        @Override public long getItemId(int p) { return p; }
+        @Override public int getCount()       { return filteredApps.size(); }
+        @Override public Object getItem(int p){ return filteredApps.get(p); }
+        @Override public long getItemId(int p){ return p; }
 
         @Override
         public View getView(int position, View convertView, ViewGroup parent) {
@@ -423,35 +475,46 @@ public class MainActivity extends Activity {
             if (convertView == null) {
                 LinearLayout cell = new LinearLayout(MainActivity.this);
                 cell.setOrientation(LinearLayout.VERTICAL);
-                cell.setGravity(Gravity.CENTER);
-                cell.setPadding(dp(4), dp(8), dp(4), dp(8));
+                cell.setGravity(Gravity.CENTER_HORIZONTAL);
+                cell.setPadding(dp(4), dp(12), dp(4), dp(12));
+
+                // Icon with subtle drop shadow background
+                FrameLayout iconFrame = new FrameLayout(MainActivity.this);
+                int iconDp = sm.getIconSizeDp();
+                LinearLayout.LayoutParams frameLp = new LinearLayout.LayoutParams(dp(iconDp), dp(iconDp));
+                iconFrame.setLayoutParams(frameLp);
 
                 ImageView icon = new ImageView(MainActivity.this);
-                int iconDp = sm.getIconSizeDp();
-                icon.setLayoutParams(new LinearLayout.LayoutParams(dp(iconDp), dp(iconDp)));
+                icon.setLayoutParams(new FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.MATCH_PARENT,
+                    FrameLayout.LayoutParams.MATCH_PARENT));
                 icon.setScaleType(ImageView.ScaleType.FIT_CENTER);
+                iconFrame.addView(icon);
 
                 TextView label = new TextView(MainActivity.this);
                 label.setGravity(Gravity.CENTER);
-                label.setTextColor(0xFFFFFFFF);
+                label.setTextColor(0xEEFFFFFF);
                 label.setTextSize(TypedValue.COMPLEX_UNIT_SP, sm.getLabelSizeSp());
-                label.setMaxLines(2);
+                label.setMaxLines(1);
                 label.setEllipsize(TextUtils.TruncateAt.END);
-                label.setPadding(0, dp(5), 0, 0);
+                label.setPadding(dp(2), dp(6), dp(2), 0);
+                label.setTypeface(Typeface.create("sans-serif", Typeface.NORMAL));
                 label.setLayoutParams(new LinearLayout.LayoutParams(
-                    dp(sm.getIconSizeDp() + 14), ViewGroup.LayoutParams.WRAP_CONTENT));
+                    dp(sm.getIconSizeDp() + 16), ViewGroup.LayoutParams.WRAP_CONTENT));
                 label.setVisibility(sm.showLabels() ? View.VISIBLE : View.GONE);
 
-                cell.addView(icon);
+                cell.addView(iconFrame);
                 cell.addView(label);
+
                 h = new ViewHolder();
-                h.icon = icon;
+                h.icon  = icon;
                 h.label = label;
                 cell.setTag(h);
                 convertView = cell;
             } else {
                 h = (ViewHolder) convertView.getTag();
             }
+
             AppInfo app = filteredApps.get(position);
             h.label.setText(app.label);
             h.icon.setImageBitmap(shapedIcon(app.icon, dp(sm.getIconSizeDp()), sm.getIconShape()));
