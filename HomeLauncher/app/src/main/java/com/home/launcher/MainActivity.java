@@ -1,13 +1,17 @@
 package com.home.launcher;
 
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.content.BroadcastReceiver;
 import android.content.Context;
+import android.content.DialogInterface;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
 import android.graphics.Bitmap;
+import android.net.Uri;
+import android.provider.Settings;
 import android.graphics.Canvas;
 import android.graphics.Paint;
 import android.graphics.Path;
@@ -321,7 +325,49 @@ public class MainActivity extends Activity {
             });
             appGrid.setOnItemLongClickListener(new android.widget.AdapterView.OnItemLongClickListener() {
                 @Override public boolean onItemLongClick(android.widget.AdapterView<?> p, View v, int pos, long id) {
-                    startActivity(new Intent(MainActivity.this, SettingsActivity.class));
+                    final AppInfo app = filteredApps.get(pos);
+                    final String pkg = app.packageName;
+                    final boolean isSelf = pkg.equals(getPackageName());
+                    final String[] options = isSelf
+                        ? new String[]{"Open", "App Info", "Launcher Settings"}
+                        : new String[]{"Open", "App Info", "Uninstall", "Launcher Settings"};
+                    new AlertDialog.Builder(MainActivity.this)
+                        .setTitle(app.label)
+                        .setItems(options, new DialogInterface.OnClickListener() {
+                            @Override public void onClick(DialogInterface dialog, int which) {
+                                if (isSelf) {
+                                    if (which == 0) {
+                                        Intent launch = new Intent(Intent.ACTION_MAIN);
+                                        launch.addCategory(Intent.CATEGORY_LAUNCHER);
+                                        launch.setClassName(app.packageName, app.activityName);
+                                        launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                                        try { startActivity(launch); } catch (Exception ignored) {}
+                                    } else if (which == 1) {
+                                        startActivity(new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                                            Uri.parse("package:" + pkg)));
+                                    } else if (which == 2) {
+                                        startActivity(new Intent(MainActivity.this, SettingsActivity.class));
+                                    }
+                                } else {
+                                    if (which == 0) {
+                                        Intent launch = new Intent(Intent.ACTION_MAIN);
+                                        launch.addCategory(Intent.CATEGORY_LAUNCHER);
+                                        launch.setClassName(app.packageName, app.activityName);
+                                        launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                                        try { startActivity(launch); } catch (Exception ignored) {}
+                                    } else if (which == 1) {
+                                        startActivity(new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                                            Uri.parse("package:" + pkg)));
+                                    } else if (which == 2) {
+                                        startActivity(new Intent(Intent.ACTION_DELETE,
+                                            Uri.parse("package:" + pkg)));
+                                    } else if (which == 3) {
+                                        startActivity(new Intent(MainActivity.this, SettingsActivity.class));
+                                    }
+                                }
+                            }
+                        })
+                        .show();
                     return true;
                 }
             });
