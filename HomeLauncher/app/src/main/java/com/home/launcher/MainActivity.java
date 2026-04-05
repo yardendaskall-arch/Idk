@@ -107,13 +107,24 @@ public class MainActivity extends Activity {
     protected void onCreate(Bundle b) {
         super.onCreate(b);
         requestWindowFeature(Window.FEATURE_NO_TITLE);
-        getWindow().setFlags(WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
-            WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN);
+        getWindow().addFlags(
+            WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN |
+            WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED |
+            WindowManager.LayoutParams.FLAG_DISMISS_KEYGUARD);
         getWindow().getDecorView().setSystemUiVisibility(
             View.SYSTEM_UI_FLAG_LAYOUT_STABLE | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN |
             View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION);
         sm = new SettingsManager(this);
+        // Register package receiver for the lifetime of this activity
+        IntentFilter pkgFilter = new IntentFilter(Intent.ACTION_PACKAGE_REMOVED);
+        pkgFilter.addDataScheme("package");
+        registerReceiver(packageReceiver, pkgFilter);
         buildUI();
+    }
+
+    @Override protected void onDestroy() {
+        super.onDestroy();
+        try { unregisterReceiver(packageReceiver); } catch (Exception ignored) {}
     }
 
     @Override protected void onResume() {
@@ -123,16 +134,12 @@ public class MainActivity extends Activity {
         buildUI();
         startClock();
         registerReceiver(timeReceiver, new IntentFilter(Intent.ACTION_TIME_TICK));
-        IntentFilter pkgFilter = new IntentFilter(Intent.ACTION_PACKAGE_REMOVED);
-        pkgFilter.addDataScheme("package");
-        registerReceiver(packageReceiver, pkgFilter);
     }
 
     @Override protected void onPause() {
         super.onPause();
         stopClock();
         try { unregisterReceiver(timeReceiver); } catch (Exception ignored) {}
-        try { unregisterReceiver(packageReceiver); } catch (Exception ignored) {}
     }
 
     @Override public boolean onTouchEvent(MotionEvent e) {
