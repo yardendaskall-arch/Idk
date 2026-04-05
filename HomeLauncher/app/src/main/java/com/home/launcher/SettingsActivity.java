@@ -2,6 +2,7 @@ package com.home.launcher;
 
 import android.app.Activity;
 import android.content.Intent;
+import android.provider.Settings;
 import android.net.Uri;
 import android.widget.Toast;
 import android.graphics.Typeface;
@@ -219,6 +220,33 @@ public class SettingsActivity extends Activity {
         appearCard.addView(makeIconShapePicker());
 
         root.addView(appearCard);
+
+        // ── LAUNCHER card ────────────────────────────────────────────────
+        LinearLayout launcherCard = startCard();
+        addSectionLabel(launcherCard, "Launcher");
+
+        addActionButton(launcherCard, "Preview Home UI", new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                Intent i = new Intent(SettingsActivity.this, MainActivity.class);
+                i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                startActivity(i);
+            }
+        });
+        addDivider(launcherCard);
+        addActionButton(launcherCard, "Set as Default Launcher", new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                try {
+                    startActivity(new Intent(android.provider.Settings.ACTION_HOME_SETTINGS));
+                } catch (Exception e) {
+                    try {
+                        startActivity(new Intent("android.settings.MANAGE_DEFAULT_APPS_SETTINGS"));
+                    } catch (Exception e2) {
+                        startActivity(new Intent(android.provider.Settings.ACTION_SETTINGS));
+                    }
+                }
+            }
+        });
+        root.addView(launcherCard);
 
         // ── ABOUT card ──────────────────────────────────────────────────
         LinearLayout aboutCard = startCard();

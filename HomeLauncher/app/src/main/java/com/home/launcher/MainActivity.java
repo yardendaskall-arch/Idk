@@ -153,6 +153,7 @@ public class MainActivity extends Activity {
         LinearLayout content = new LinearLayout(this);
         content.setOrientation(LinearLayout.VERTICAL);
 
+        if (!isDefaultLauncher()) content.addView(buildSetupBanner());
         content.addView(buildClockSection());
         if (sm.showSearch() && !sm.searchBottom()) content.addView(buildSearchSection());
         content.addView(buildGrid());   // weight=1 expands grid
@@ -166,6 +167,69 @@ public class MainActivity extends Activity {
         setContentView(rootFrame);
         updateClock();
         loadApps();
+    }
+
+    private boolean isDefaultLauncher() {
+        Intent home = new Intent(Intent.ACTION_MAIN);
+        home.addCategory(Intent.CATEGORY_HOME);
+        ResolveInfo ri = getPackageManager().resolveActivity(home, PackageManager.MATCH_DEFAULT_ONLY);
+        return ri != null && getPackageName().equals(ri.activityInfo.packageName);
+    }
+
+    private View buildSetupBanner() {
+        LinearLayout card = new LinearLayout(this);
+        card.setOrientation(LinearLayout.VERTICAL);
+        card.setPadding(dp(18), dp(14), dp(18), dp(14));
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        lp.setMargins(dp(16), dp(52), dp(16), 0);
+        card.setLayoutParams(lp);
+        GradientDrawable bg = new GradientDrawable();
+        bg.setColor(0x22FFFFFF);
+        bg.setCornerRadius(dp(14));
+        bg.setStroke(1, 0x33FFFFFF);
+        card.setBackground(bg);
+
+        TextView title = new TextView(this);
+        title.setText("NOT SET AS DEFAULT LAUNCHER");
+        title.setTextColor(sm.getAccentColor());
+        title.setTextSize(TypedValue.COMPLEX_UNIT_SP, 10);
+        title.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
+        title.setLetterSpacing(0.1f);
+        card.addView(title);
+
+        TextView steps = new TextView(this);
+        steps.setText("To set as your home screen:\nSettings  →  Apps  →  Default apps  →  Home app  →  select Home Launcher");
+        steps.setTextColor(0xBBFFFFFF);
+        steps.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
+        steps.setPadding(0, dp(6), 0, dp(12));
+        card.addView(steps);
+
+        TextView btn = new TextView(this);
+        btn.setText("Open Default App Settings");
+        btn.setTextColor(0xFF000000);
+        btn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
+        btn.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
+        btn.setGravity(Gravity.CENTER);
+        btn.setPadding(dp(18), dp(8), dp(18), dp(8));
+        GradientDrawable btnBg = new GradientDrawable();
+        btnBg.setColor(sm.getAccentColor());
+        btnBg.setCornerRadius(dp(20));
+        btn.setBackground(btnBg);
+        btn.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                try {
+                    startActivity(new Intent(android.provider.Settings.ACTION_HOME_SETTINGS));
+                } catch (Exception e) {
+                    try {
+                        startActivity(new Intent("android.settings.MANAGE_DEFAULT_APPS_SETTINGS"));
+                    } catch (Exception e2) {
+                        startActivity(new Intent(android.provider.Settings.ACTION_SETTINGS));
+                    }
+                }
+            }
+        });
+        card.addView(btn);
+        return card;
     }
 
     private void applyBackground() {
