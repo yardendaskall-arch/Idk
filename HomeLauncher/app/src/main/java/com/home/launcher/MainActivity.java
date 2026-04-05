@@ -68,6 +68,18 @@ public class MainActivity extends Activity {
     private AppAdapter adapter;
     private SettingsManager sm;
 
+    private String pendingUninstallPkg = null;
+    private BroadcastReceiver packageReceiver = new BroadcastReceiver() {
+        @Override public void onReceive(Context c, Intent i) {
+            String pkg = i.getData() != null ? i.getData().getSchemeSpecificPart() : null;
+            if (pkg == null) return;
+            if (pkg.equals(pendingUninstallPkg)) {
+                pendingUninstallPkg = null;
+                poofRemovedApp(pkg);
+            }
+        }
+    };
+
     // Filter state
     private String currentCategory = "";  // "" = ALL
     private String currentLetter   = "";  // "" = all letters
@@ -111,12 +123,16 @@ public class MainActivity extends Activity {
         buildUI();
         startClock();
         registerReceiver(timeReceiver, new IntentFilter(Intent.ACTION_TIME_TICK));
+        IntentFilter pkgFilter = new IntentFilter(Intent.ACTION_PACKAGE_REMOVED);
+        pkgFilter.addDataScheme("package");
+        registerReceiver(packageReceiver, pkgFilter);
     }
 
     @Override protected void onPause() {
         super.onPause();
         stopClock();
         try { unregisterReceiver(timeReceiver); } catch (Exception ignored) {}
+        try { unregisterReceiver(packageReceiver); } catch (Exception ignored) {}
     }
 
     @Override public boolean onTouchEvent(MotionEvent e) {
@@ -726,7 +742,14 @@ public class MainActivity extends Activity {
             sheet.addView(makeDivider());
             sheet.addView(makeMenuRow(dialog, "Uninstall", 0xFFFF5555, new Runnable() {
                 public void run() {
-                    poofAndUninstall(anchor, app.packageName);
+                    pendingUninstallPkg = app.packageName;
+                    Intent del = new Intent(Intent.ACTION_DELETE);
+                    del.setData(Uri.parse("package:" + app.packageName));
+                    del.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                    try { startActivity(del); } catch (Exception e) {
+                        pendingUninstallPkg = null;
+                        Toast.makeText(MainActivity.this, "Cannot uninstall", Toast.LENGTH_SHORT).show();
+                    }
                 }
             }));
         }
@@ -739,33 +762,36 @@ public class MainActivity extends Activity {
         dialog.show();
     }
 
-    private void poofAndUninstall(final View anchor, final String packageName) {
-        // Scale up slightly then shrink to nothing with a fade — the "poof"
-        anchor.animate()
-            .scaleX(1.25f).scaleY(1.25f)
-            .setDuration(80)
-            .withEndAction(new Runnable() {
-                @Override public void run() {
-                    anchor.animate()
-                        .scaleX(0f).scaleY(0f)
-                        .alpha(0f)
-                        .setDuration(200)
-                        .withEndAction(new Runnable() {
-                            @Override public void run() {
-                                // Reset view so it looks normal if user cancels uninstall
-                                anchor.setScaleX(1f);
-                                anchor.setScaleY(1f);
-                                anchor.setAlpha(1f);
-                                Intent del = new Intent(Intent.ACTION_DELETE);
-                                del.setData(Uri.parse("package:" + packageName));
-                                del.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-                                try { startActivity(del); } catch (Exception e) {
-                                    Toast.makeText(MainActivity.this, "Cannot uninstall", Toast.LENGTH_SHORT).show();
-                                }
-                            }
-                        }).start();
-                }
-            }).start();
+    private void poofRemovedApp(final String packageName) {
+        // Find the position of the removed app in the grid and animate it
+        int targetPos = -1;
+        for (int i = 0; i < filteredApps.size(); i++) {
+            if (filteredApps.get(i).packageName.equals(packageName)) { targetPos = i; break; }
+        }
+        if (targetPos >= 0) {
+            int firstVisible = appGrid.getFirstVisiblePosition();
+            int childIndex = targetPos - firstVisible;
+            final View cell = (childIndex >= 0 && childIndex < appGrid.getChildCount())
+                ? appGrid.getChildAt(childIndex) : null;
+            if (cell != null) {
+                cell.animate()
+                    .scaleX(1.25f).scaleY(1.25f).setDuration(80)
+                    .withEndAction(new Runnable() {
+                        @Override public void run() {
+                            cell.animate()
+                                .scaleX(0f).scaleY(0f).alpha(0f).setDuration(200)
+                                .withEndAction(new Runnable() {
+                                    @Override public void run() {
+                                        cell.setScaleX(1f); cell.setScaleY(1f); cell.setAlpha(1f);
+                                        loadApps();
+                                    }
+                                }).start();
+                        }
+                    }).start();
+                return;
+            }
+        }
+        loadApps(); // fallback if cell not visible
     }
 
     private View makeMenuRow(final Dialog dialog, String label, int textColor, final Runnable action) {
