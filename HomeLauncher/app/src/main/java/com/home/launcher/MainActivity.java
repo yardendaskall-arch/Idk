@@ -362,7 +362,7 @@ public class MainActivity extends Activity {
             });
             cell.setOnLongClickListener(new View.OnLongClickListener() {
                 @Override public boolean onLongClick(View v) {
-                    showAppMenu(app); return true;
+                    showAppMenu(app, v); return true;
                 }
             });
         }
@@ -462,7 +462,7 @@ public class MainActivity extends Activity {
             appGrid.setOnItemLongClickListener(new android.widget.AdapterView.OnItemLongClickListener() {
                 @Override public boolean onItemLongClick(android.widget.AdapterView<?> p, View v,
                                                         int pos, long id) {
-                    showAppMenu(filteredApps.get(pos));
+                    showAppMenu(filteredApps.get(pos), v);
                     return true;
                 }
             });
@@ -473,37 +473,46 @@ public class MainActivity extends Activity {
 
     // ─── Custom App Popup ──────────────────────────────────────────────
 
-    private void showAppMenu(final AppInfo app) {
+    private void showAppMenu(final AppInfo app, final View anchor) {
         final Dialog dialog = new Dialog(this);
         dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
         dialog.getWindow().setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
-        dialog.getWindow().setGravity(Gravity.BOTTOM | Gravity.FILL_HORIZONTAL);
-        dialog.getWindow().setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        dialog.getWindow().setDimAmount(0.6f);
+        dialog.getWindow().setDimAmount(0.5f);
+
+        // Position near the long-pressed icon
+        int popupW = dp(270);
+        int[] loc = new int[2];
+        anchor.getLocationOnScreen(loc);
+        int anchorCenterX = loc[0] + anchor.getWidth() / 2;
+        int anchorBottom  = loc[1] + anchor.getHeight();
+        int screenW = getResources().getDisplayMetrics().widthPixels;
+        int screenH = getResources().getDisplayMetrics().heightPixels;
+        int px = anchorCenterX - popupW / 2;
+        px = Math.max(dp(8), Math.min(px, screenW - popupW - dp(8)));
+        int py = anchorBottom + dp(6);
+        // If the popup would go off the bottom (estimate 340dp height), flip above
+        if (py + dp(340) > screenH) py = Math.max(dp(8), loc[1] - dp(346));
+
+        dialog.getWindow().setGravity(Gravity.TOP | Gravity.START);
+        android.view.WindowManager.LayoutParams wlp = dialog.getWindow().getAttributes();
+        wlp.x = px;
+        wlp.y = py;
+        wlp.width = popupW;
+        wlp.height = ViewGroup.LayoutParams.WRAP_CONTENT;
+        dialog.getWindow().setAttributes(wlp);
 
         final boolean isSelf = app.packageName.equals(getPackageName());
         int accent = sm.getAccentColor();
 
-        // Root sheet
+        // Root sheet — rounded on all corners since it's a floating card
         LinearLayout sheet = new LinearLayout(this);
         sheet.setOrientation(LinearLayout.VERTICAL);
         GradientDrawable sheetBg = new GradientDrawable();
         sheetBg.setColor(0xFF1C1B2E);
-        sheetBg.setCornerRadii(new float[]{dp(20), dp(20), dp(20), dp(20), 0, 0, 0, 0});
+        sheetBg.setCornerRadius(dp(18));
+        sheetBg.setStroke(dp(1), 0x33FFFFFF);
         sheet.setBackground(sheetBg);
-        sheet.setPadding(0, dp(12), 0, dp(28));
-
-        // Drag handle
-        View handle = new View(this);
-        GradientDrawable handleBg = new GradientDrawable();
-        handleBg.setColor(0x44FFFFFF);
-        handleBg.setCornerRadius(dp(3));
-        handle.setBackground(handleBg);
-        LinearLayout.LayoutParams handleLp = new LinearLayout.LayoutParams(dp(40), dp(4));
-        handleLp.gravity = Gravity.CENTER_HORIZONTAL;
-        handleLp.setMargins(0, 0, 0, dp(16));
-        handle.setLayoutParams(handleLp);
-        sheet.addView(handle);
+        sheet.setPadding(0, dp(8), 0, dp(8));
 
         // App header
         LinearLayout hdr = new LinearLayout(this);

@@ -2,7 +2,11 @@ package com.home.launcher;
 
 import android.app.Activity;
 import android.app.WallpaperManager;
+import android.content.ContentResolver;
 import android.content.Intent;
+import android.net.Uri;
+import android.widget.Toast;
+import java.io.InputStream;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Bundle;
@@ -22,6 +26,7 @@ import android.widget.TextView;
 
 public class SettingsActivity extends Activity {
 
+    private static final int REQ_PICK_WP = 1001;
     private SettingsManager sm;
     private int accent;
 
@@ -181,11 +186,12 @@ public class SettingsActivity extends Activity {
             new SeekCallback() { public void onValue(int v) { sm.set(SettingsManager.KEY_WP_DIM, v * 10); }});
 
         addDivider(wpCard);
-        addSubLabel(wpCard, "System wallpaper");
+        addSubLabel(wpCard, "Pick image for home + lock screen");
         addActionButton(wpCard, "Change Wallpaper", new View.OnClickListener() {
             @Override public void onClick(View v) {
-                Intent intent = new Intent(Intent.ACTION_SET_WALLPAPER);
-                startActivity(Intent.createChooser(intent, "Select Wallpaper"));
+                Intent pick = new Intent(Intent.ACTION_GET_CONTENT);
+                pick.setType("image/*");
+                startActivityForResult(Intent.createChooser(pick, "Pick Wallpaper"), REQ_PICK_WP);
             }
         });
 
@@ -587,6 +593,38 @@ public class SettingsActivity extends Activity {
             });
         }
         return row;
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == REQ_PICK_WP && resultCode == RESULT_OK && data != null && data.getData() != null) {
+            Uri uri = data.getData();
+            try {
+                WallpaperManager wm = WallpaperManager.getInstance(this);
+                if (android.os.Build.VERSION.SDK_INT >= 24) {
+                    // Apply to both home (FLAG_SYSTEM=1) and lock (FLAG_LOCK=2) via reflection
+                    // to avoid API 24+ compile-time dependency
+                    InputStream s1 = getContentResolver().openInputStream(uri);
+                    try {
+                        java.lang.reflect.Method m = WallpaperManager.class.getMethod(
+                            "setStream", InputStream.class, android.graphics.Rect.class,
+                            boolean.class, int.class);
+                        m.invoke(wm, s1, null, true, 3); // FLAG_SYSTEM|FLAG_LOCK = 1|2 = 3
+                    } catch (Exception ex) {
+                        wm.setStream(s1); // fallback
+                    }
+                    if (s1 != null) s1.close();
+                } else {
+                    InputStream s2 = getContentResolver().openInputStream(uri);
+                    wm.setStream(s2);
+                    if (s2 != null) s2.close();
+                }
+                Toast.makeText(this, "Wallpaper set for home & lock screen", Toast.LENGTH_SHORT).show();
+            } catch (Exception e) {
+                Toast.makeText(this, "Failed: " + e.getMessage(), Toast.LENGTH_SHORT).show();
+            }
+        }
     }
 
     private int dp(int dp) {
