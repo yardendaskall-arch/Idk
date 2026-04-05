@@ -166,6 +166,33 @@ public class MainActivity extends Activity {
     }
 
     private void applyBackground() {
+        String customUri = sm.getCustomWpUri();
+        if (customUri != null && !customUri.isEmpty()) {
+            // Load custom image as launcher background
+            try {
+                android.net.Uri uri = android.net.Uri.parse(customUri);
+                android.graphics.BitmapFactory.Options opts = new android.graphics.BitmapFactory.Options();
+                opts.inSampleSize = 2; // downsample to save memory
+                java.io.InputStream is = getContentResolver().openInputStream(uri);
+                Bitmap bmp = android.graphics.BitmapFactory.decodeStream(is, null, opts);
+                if (is != null) is.close();
+                if (bmp != null) {
+                    // Apply dim overlay by drawing it on a canvas on top of the bitmap
+                    int dimAlpha = (int) (sm.getWpDim() / 100f * 220); // max 220 to keep some image visible
+                    android.graphics.Bitmap dimmed = Bitmap.createBitmap(bmp.getWidth(), bmp.getHeight(), Bitmap.Config.ARGB_8888);
+                    Canvas c = new Canvas(dimmed);
+                    c.drawBitmap(bmp, 0, 0, null);
+                    Paint p = new Paint();
+                    p.setColor(Color.argb(dimAlpha, 0, 0, 0));
+                    c.drawRect(0, 0, dimmed.getWidth(), dimmed.getHeight(), p);
+                    bmp.recycle();
+                    rootFrame.setBackground(new BitmapDrawable(getResources(), dimmed));
+                    return;
+                }
+            } catch (Exception e) {
+                // Fall through to gradient if image load fails
+            }
+        }
         if (sm.useSystemWallpaper()) {
             // Dark overlay on top of system wallpaper
             int alpha = (int) (sm.getWpDim() / 100f * 255);

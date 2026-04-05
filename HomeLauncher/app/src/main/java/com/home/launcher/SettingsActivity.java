@@ -1,12 +1,9 @@
 package com.home.launcher;
 
 import android.app.Activity;
-import android.app.WallpaperManager;
-import android.content.ContentResolver;
 import android.content.Intent;
 import android.net.Uri;
 import android.widget.Toast;
-import java.io.InputStream;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Bundle;
@@ -186,12 +183,21 @@ public class SettingsActivity extends Activity {
             new SeekCallback() { public void onValue(int v) { sm.set(SettingsManager.KEY_WP_DIM, v * 10); }});
 
         addDivider(wpCard);
-        addSubLabel(wpCard, "Pick image for home + lock screen");
-        addActionButton(wpCard, "Change Wallpaper", new View.OnClickListener() {
+        addSubLabel(wpCard, "Custom launcher background image");
+        addActionButton(wpCard, "Pick from Gallery", new View.OnClickListener() {
             @Override public void onClick(View v) {
                 Intent pick = new Intent(Intent.ACTION_GET_CONTENT);
                 pick.setType("image/*");
+                pick.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION
+                    | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
                 startActivityForResult(Intent.createChooser(pick, "Pick Wallpaper"), REQ_PICK_WP);
+            }
+        });
+        addDivider(wpCard);
+        addActionButton(wpCard, "Remove Custom Wallpaper", new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                sm.set(SettingsManager.KEY_CUSTOM_WP_URI, "");
+                Toast.makeText(SettingsActivity.this, "Custom wallpaper removed", Toast.LENGTH_SHORT).show();
             }
         });
 
@@ -601,29 +607,13 @@ public class SettingsActivity extends Activity {
         if (requestCode == REQ_PICK_WP && resultCode == RESULT_OK && data != null && data.getData() != null) {
             Uri uri = data.getData();
             try {
-                WallpaperManager wm = WallpaperManager.getInstance(this);
-                if (android.os.Build.VERSION.SDK_INT >= 24) {
-                    // Apply to both home (FLAG_SYSTEM=1) and lock (FLAG_LOCK=2) via reflection
-                    // to avoid API 24+ compile-time dependency
-                    InputStream s1 = getContentResolver().openInputStream(uri);
-                    try {
-                        java.lang.reflect.Method m = WallpaperManager.class.getMethod(
-                            "setStream", InputStream.class, android.graphics.Rect.class,
-                            boolean.class, int.class);
-                        m.invoke(wm, s1, null, true, 3); // FLAG_SYSTEM|FLAG_LOCK = 1|2 = 3
-                    } catch (Exception ex) {
-                        wm.setStream(s1); // fallback
-                    }
-                    if (s1 != null) s1.close();
-                } else {
-                    InputStream s2 = getContentResolver().openInputStream(uri);
-                    wm.setStream(s2);
-                    if (s2 != null) s2.close();
-                }
-                Toast.makeText(this, "Wallpaper set for home & lock screen", Toast.LENGTH_SHORT).show();
-            } catch (Exception e) {
-                Toast.makeText(this, "Failed: " + e.getMessage(), Toast.LENGTH_SHORT).show();
-            }
+                // Persist read permission so the launcher can access the image after reboot
+                getContentResolver().takePersistableUriPermission(
+                    uri, Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            } catch (Exception ignored) {}
+            // Save URI to prefs — MainActivity loads it as the launcher background
+            sm.set(SettingsManager.KEY_CUSTOM_WP_URI, uri.toString());
+            Toast.makeText(this, "Launcher wallpaper updated", Toast.LENGTH_SHORT).show();
         }
     }
 

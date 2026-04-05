@@ -26,6 +26,7 @@ public class SettingsManager {
     static final String KEY_WP_DIM              = "wp_dim";
     static final String KEY_DOCK_ENABLED        = "dock_enabled";
     static final String KEY_DOCK_PACKAGES       = "dock_packages";
+    static final String KEY_CUSTOM_WP_URI       = "custom_wp_uri";
 
     static final int[][] BG_PRESETS = {
         {0xFF0F0C29, 0xFF24243E}, // Deep Purple
@@ -82,6 +83,7 @@ public class SettingsManager {
     public int     getWpDim()            { return prefs.getInt(KEY_WP_DIM, 40); }
     public boolean dockEnabled()         { return prefs.getBoolean(KEY_DOCK_ENABLED, true); }
     public String  getDockPackages()     { return prefs.getString(KEY_DOCK_PACKAGES, ""); }
+    public String  getCustomWpUri()      { return prefs.getString(KEY_CUSTOM_WP_URI, ""); }
 
     public void set(String key, int val)     { prefs.edit().putInt(key, val).apply(); }
     public void set(String key, boolean val) { prefs.edit().putBoolean(key, val).apply(); }
