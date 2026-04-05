@@ -726,12 +726,7 @@ public class MainActivity extends Activity {
             sheet.addView(makeDivider());
             sheet.addView(makeMenuRow(dialog, "Uninstall", 0xFFFF5555, new Runnable() {
                 public void run() {
-                    Intent del = new Intent(Intent.ACTION_DELETE);
-                    del.setData(Uri.parse("package:" + app.packageName));
-                    del.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-                    try { startActivity(del); } catch (Exception e) {
-                        Toast.makeText(MainActivity.this, "Cannot uninstall", Toast.LENGTH_SHORT).show();
-                    }
+                    poofAndUninstall(anchor, app.packageName);
                 }
             }));
         }
@@ -742,6 +737,35 @@ public class MainActivity extends Activity {
 
         dialog.setContentView(sheet);
         dialog.show();
+    }
+
+    private void poofAndUninstall(final View anchor, final String packageName) {
+        // Scale up slightly then shrink to nothing with a fade — the "poof"
+        anchor.animate()
+            .scaleX(1.25f).scaleY(1.25f)
+            .setDuration(80)
+            .withEndAction(new Runnable() {
+                @Override public void run() {
+                    anchor.animate()
+                        .scaleX(0f).scaleY(0f)
+                        .alpha(0f)
+                        .setDuration(200)
+                        .withEndAction(new Runnable() {
+                            @Override public void run() {
+                                // Reset view so it looks normal if user cancels uninstall
+                                anchor.setScaleX(1f);
+                                anchor.setScaleY(1f);
+                                anchor.setAlpha(1f);
+                                Intent del = new Intent(Intent.ACTION_DELETE);
+                                del.setData(Uri.parse("package:" + packageName));
+                                del.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                                try { startActivity(del); } catch (Exception e) {
+                                    Toast.makeText(MainActivity.this, "Cannot uninstall", Toast.LENGTH_SHORT).show();
+                                }
+                            }
+                        }).start();
+                }
+            }).start();
     }
 
     private View makeMenuRow(final Dialog dialog, String label, int textColor, final Runnable action) {
