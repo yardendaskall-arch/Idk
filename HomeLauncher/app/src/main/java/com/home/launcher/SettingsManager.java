@@ -37,6 +37,7 @@ public class SettingsManager {
     static final String KEY_GRID_PADDING         = "grid_padding";
     static final String KEY_SWIPE_UP_ACTION      = "swipe_up_action"; // 0=off 1=search 2=notifications
     static final String KEY_DOUBLE_TAP_PKG       = "double_tap_pkg";
+    static final String KEY_WIDGET_IDS           = "widget_ids";
 
     static final int[][] BG_PRESETS = {
         {0xFF0F0C29, 0xFF24243E}, // Deep Purple
@@ -104,6 +105,7 @@ public class SettingsManager {
     public int     getGridPadding()      { return prefs.getInt(KEY_GRID_PADDING, 1); }
     public int     getSwipeUpAction()    { return prefs.getInt(KEY_SWIPE_UP_ACTION, 1); }
     public String  getDoubleTapPkg()     { return prefs.getString(KEY_DOUBLE_TAP_PKG, ""); }
+    public String  getWidgetIds()        { return prefs.getString(KEY_WIDGET_IDS, ""); }
 
     // Lock screen BG presets (darker/minimal subset)
     static final int[][] LOCK_BG_PRESETS = {

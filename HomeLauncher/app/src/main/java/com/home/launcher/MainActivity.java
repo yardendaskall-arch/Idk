@@ -89,6 +89,7 @@ public class MainActivity extends Activity {
 
     private LinearLayout catPillRow;
     private LinearLayout azRow;
+    private LinearLayout filterBar;
     private TextView activeLetterPill = null;
     private TextView activeCatPill    = null;
 
@@ -98,6 +99,15 @@ public class MainActivity extends Activity {
     private KeyguardManager km;
     private boolean showingLock = false;
     private TextView lockClockView, lockDateView;
+
+    // AppWidget support
+    private android.appwidget.AppWidgetHost appWidgetHost;
+    private android.appwidget.AppWidgetManager appWidgetManager;
+    private LinearLayout widgetContainer;
+    private int pendingWidgetId = -1;
+    private static final int WIDGET_HOST_ID  = 1024;
+    private static final int REQ_PICK_WIDGET = 2001;
+    private static final int REQ_BIND_WIDGET = 2002;
 
     private static final String[] CATEGORIES = {
         "ALL", "GAMES", "SOCIAL", "MEDIA", "TOOLS", "BROWSER",
@@ -120,6 +130,8 @@ public class MainActivity extends Activity {
             View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION);
         sm = new SettingsManager(this);
         km = (KeyguardManager) getSystemService(KEYGUARD_SERVICE);
+        appWidgetHost = new android.appwidget.AppWidgetHost(this, WIDGET_HOST_ID);
+        appWidgetManager = android.appwidget.AppWidgetManager.getInstance(this);
         // Register package receiver for the lifetime of this activity
         IntentFilter pkgFilter = new IntentFilter(Intent.ACTION_PACKAGE_REMOVED);
         pkgFilter.addDataScheme("package");
@@ -136,6 +148,7 @@ public class MainActivity extends Activity {
         super.onResume();
         sm = new SettingsManager(this);
         adapter = null;
+        appWidgetHost.startListening();
         buildUI();
         startClock();
         registerReceiver(timeReceiver, new IntentFilter(Intent.ACTION_TIME_TICK));
@@ -145,6 +158,7 @@ public class MainActivity extends Activity {
         super.onPause();
         stopClock();
         try { unregisterReceiver(timeReceiver); } catch (Exception ignored) {}
+        try { appWidgetHost.stopListening(); } catch (Exception ignored) {}
     }
 
     @Override public boolean onTouchEvent(MotionEvent e) {
@@ -199,7 +213,7 @@ public class MainActivity extends Activity {
 
         applyBackground();
         rootFrame.setOnLongClickListener(new View.OnLongClickListener() {
-            @Override public boolean onLongClick(View v) { openSettings(); return true; }
+            @Override public boolean onLongClick(View v) { showHomeLongPressMenu(); return true; }
         });
 
         LinearLayout content = new LinearLayout(this);
@@ -208,7 +222,7 @@ public class MainActivity extends Activity {
         if (!isDefaultLauncher()) content.addView(buildSetupBanner());
         content.addView(buildClockSection());
         if (sm.showSearch() && !sm.searchBottom()) content.addView(buildSearchSection());
-        if (sm.showWidgets()) content.addView(buildWidgetRow());
+        content.addView(buildAppWidgetArea());
         content.addView(buildGrid());
         if (sm.showSearch() && sm.searchBottom()) content.addView(buildSearchSection());
         content.addView(buildFilterBar());
@@ -232,27 +246,24 @@ public class MainActivity extends Activity {
         rootFrame.setBackground(lockBg);
         int accent = sm.getAccentColor();
 
-        // Swipe-up touch on root to unlock
-        rootFrame.setOnTouchListener(new View.OnTouchListener() {
-            private float downY;
-            @Override public boolean onTouch(View v, MotionEvent e) {
-                if (e.getAction() == MotionEvent.ACTION_DOWN) { downY = e.getY(); return true; }
-                if (e.getAction() == MotionEvent.ACTION_UP) {
-                    if (downY - e.getY() > dp(80)) {
-                        unlockAndShowHome();
-                        return true;
-                    }
-                }
-                return true;
-            }
-        });
-
         // Full-height vertical layout
         LinearLayout lock = new LinearLayout(this);
         lock.setOrientation(LinearLayout.VERTICAL);
         lock.setGravity(Gravity.CENTER_HORIZONTAL);
         rootFrame.addView(lock, new FrameLayout.LayoutParams(
             FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
+
+        // Swipe-up touch on the lock view itself (not rootFrame — child intercepts parent)
+        lock.setOnTouchListener(new View.OnTouchListener() {
+            private float downY;
+            @Override public boolean onTouch(View v, MotionEvent e) {
+                if (e.getAction() == MotionEvent.ACTION_DOWN) { downY = e.getY(); return true; }
+                if (e.getAction() == MotionEvent.ACTION_UP) {
+                    if (downY - e.getY() > dp(60)) { unlockAndShowHome(); return true; }
+                }
+                return true;
+            }
+        });
 
         // ── Top spacer
         View topSpacer = new View(this);
@@ -728,32 +739,26 @@ public class MainActivity extends Activity {
         LinearLayout sec = new LinearLayout(this);
         sec.setOrientation(LinearLayout.VERTICAL);
         sec.setGravity(Gravity.CENTER_HORIZONTAL);
-        sec.setPadding(dp(24), dp(56), dp(24), dp(8));
+        sec.setPadding(dp(24), dp(60), dp(24), dp(2));
         sec.setVisibility(sm.showClock() ? View.VISIBLE : View.GONE);
 
         clockView = new TextView(this);
         clockView.setTextColor(0xFFFFFFFF);
         clockView.setTextSize(TypedValue.COMPLEX_UNIT_SP, sm.getClockSizeSp());
-        clockView.setTypeface(Typeface.create("sans-serif-light", Typeface.NORMAL));
-        clockView.setLetterSpacing(-0.03f);
-        clockView.setShadowLayer(dp(8), 0, dp(2), 0x55000000);
+        clockView.setTypeface(Typeface.create("sans-serif-thin", Typeface.NORMAL));
+        clockView.setLetterSpacing(-0.04f);
+        clockView.setGravity(Gravity.CENTER);
 
         dateView = new TextView(this);
-        dateView.setTextColor(0x88FFFFFF);
-        dateView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11);
-        dateView.setLetterSpacing(0.12f);
-        dateView.setPadding(0, dp(2), 0, dp(2));
+        dateView.setTextColor(0x66FFFFFF);
+        dateView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
+        dateView.setLetterSpacing(0.08f);
+        dateView.setGravity(Gravity.CENTER);
+        dateView.setPadding(0, dp(3), 0, 0);
         dateView.setVisibility(sm.showDate() ? View.VISIBLE : View.GONE);
 
         sec.addView(clockView);
         sec.addView(dateView);
-
-        View sep = new View(this);
-        sep.setBackgroundColor(0x14FFFFFF);
-        LinearLayout.LayoutParams sepLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 1);
-        sepLp.setMargins(dp(40), dp(10), dp(40), 0);
-        sep.setLayoutParams(sepLp);
-        sec.addView(sep);
         return sec;
     }
 
@@ -761,31 +766,30 @@ public class MainActivity extends Activity {
 
     private View buildSearchSection() {
         LinearLayout outer = new LinearLayout(this);
-        outer.setPadding(dp(16), dp(8), dp(16), dp(4));
+        outer.setPadding(dp(20), dp(10), dp(20), dp(4));
 
         LinearLayout pill = new LinearLayout(this);
         pill.setOrientation(LinearLayout.HORIZONTAL);
         pill.setGravity(Gravity.CENTER_VERTICAL);
-        pill.setPadding(dp(16), 0, dp(14), 0);
+        pill.setPadding(dp(20), 0, dp(16), 0);
         GradientDrawable pillBg = new GradientDrawable();
-        pillBg.setCornerRadius(dp(28));
-        pillBg.setColor(0x1AFFFFFF);
-        pillBg.setStroke(1, 0x28FFFFFF);
+        pillBg.setCornerRadius(dp(26));
+        pillBg.setColor(0x18FFFFFF);
         pill.setBackground(pillBg);
-        pill.setLayoutParams(new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(46)));
+        pill.setLayoutParams(new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(52)));
 
-        TextView icon = new TextView(this);
-        icon.setText("/ /");
-        icon.setTextColor(0x55FFFFFF);
-        icon.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11);
-        icon.setTypeface(Typeface.create("sans-serif-light", Typeface.NORMAL));
-        icon.setPadding(0, 0, dp(10), 0);
+        // Magnifier symbol using a plain Unicode char
+        TextView searchIcon = new TextView(this);
+        searchIcon.setText("\uD83D\uDD0D");
+        searchIcon.setTextColor(0x40FFFFFF);
+        searchIcon.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
+        searchIcon.setPadding(0, 0, dp(10), 0);
 
         searchBar = new EditText(this);
-        searchBar.setHint("search apps");
+        searchBar.setHint("Search apps");
         searchBar.setTextColor(0xFFFFFFFF);
-        searchBar.setHintTextColor(0x44FFFFFF);
-        searchBar.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
+        searchBar.setHintTextColor(0x40FFFFFF);
+        searchBar.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
         searchBar.setBackground(null);
         searchBar.setSingleLine(true);
         searchBar.setLayoutParams(new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
@@ -795,10 +799,12 @@ public class MainActivity extends Activity {
             public void onTextChanged(CharSequence s, int a, int b, int c) {
                 currentSearch = s.toString();
                 applyFilters();
+                if (filterBar != null)
+                    filterBar.setVisibility(currentSearch.isEmpty() ? View.GONE : View.VISIBLE);
             }
         });
 
-        pill.addView(icon);
+        pill.addView(searchIcon);
         pill.addView(searchBar);
         outer.addView(pill);
         return outer;
@@ -811,9 +817,9 @@ public class MainActivity extends Activity {
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f);
         appGrid.setLayoutParams(lp);
         appGrid.setNumColumns(sm.getColumns());
-        appGrid.setVerticalSpacing(dp(2));
-        appGrid.setHorizontalSpacing(dp(2));
-        appGrid.setPadding(dp(6), dp(6), dp(6), dp(8));
+        appGrid.setVerticalSpacing(dp(6));
+        appGrid.setHorizontalSpacing(dp(6));
+        appGrid.setPadding(dp(14), dp(8), dp(14), dp(8));
         appGrid.setClipToPadding(false);
         appGrid.setStretchMode(GridView.STRETCH_COLUMN_WIDTH);
         appGrid.setScrollbarFadingEnabled(true);
@@ -824,9 +830,11 @@ public class MainActivity extends Activity {
     // ─── Filter bar (categories + A-Z) ───────────────────────────────────
 
     private View buildFilterBar() {
-        LinearLayout bar = new LinearLayout(this);
-        bar.setOrientation(LinearLayout.VERTICAL);
-        bar.setLayoutParams(new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        filterBar = new LinearLayout(this);
+        filterBar.setOrientation(LinearLayout.VERTICAL);
+        filterBar.setLayoutParams(new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        filterBar.setVisibility(View.GONE); // hidden unless search is active
+        LinearLayout bar = filterBar;
 
         // thin separator
         View sep = new View(this);
@@ -920,7 +928,7 @@ public class MainActivity extends Activity {
 
         catScroll.addView(catPillRow);
         bar.addView(catScroll);
-        return bar;
+        return filterBar;
     }
 
     private void setLetterPillActive(TextView pill) {
@@ -953,22 +961,21 @@ public class MainActivity extends Activity {
     // ─── Dock ─────────────────────────────────────────────────────────────
 
     private View buildDock() {
+        // Outer container with bottom padding for nav bar
         LinearLayout dockWrap = new LinearLayout(this);
         dockWrap.setOrientation(LinearLayout.VERTICAL);
-        dockWrap.setPadding(dp(12), dp(4), dp(12), dp(20));
+        dockWrap.setPadding(dp(20), dp(6), dp(20), dp(24));
 
-        View sep = new View(this);
-        sep.setBackgroundColor(0x14FFFFFF);
-        LinearLayout.LayoutParams sepLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 1);
-        sepLp.setMargins(dp(32), 0, dp(32), dp(8));
-        sep.setLayoutParams(sepLp);
-        dockWrap.addView(sep);
-
-        HorizontalScrollView hsv = new HorizontalScrollView(this);
-        hsv.setHorizontalScrollBarEnabled(false);
-        LinearLayout row = new LinearLayout(this);
-        row.setOrientation(LinearLayout.HORIZONTAL);
-        row.setGravity(Gravity.CENTER_VERTICAL);
+        // Frosted-glass pill
+        LinearLayout pill = new LinearLayout(this);
+        pill.setOrientation(LinearLayout.HORIZONTAL);
+        pill.setGravity(Gravity.CENTER);
+        pill.setPadding(dp(12), dp(12), dp(12), dp(12));
+        GradientDrawable pillBg = new GradientDrawable();
+        pillBg.setColor(0x22FFFFFF);
+        pillBg.setCornerRadius(dp(30));
+        pillBg.setStroke(1, 0x18FFFFFF);
+        pill.setBackground(pillBg);
 
         String[] wantedPkgs = {
             "com.android.dialer","com.google.android.dialer",
@@ -990,27 +997,32 @@ public class MainActivity extends Activity {
             if (!already) dockApps.add(a);
         }
 
-        int iconDp = sm.getIconSizeDp() - 8;
+        int iconDp = sm.getIconSizeDp();
         for (final AppInfo app : dockApps) {
             LinearLayout cell = new LinearLayout(this);
             cell.setOrientation(LinearLayout.VERTICAL);
             cell.setGravity(Gravity.CENTER);
-            cell.setPadding(dp(12), dp(4), dp(12), dp(4));
+            LinearLayout.LayoutParams cellLp = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+            cell.setLayoutParams(cellLp);
             ImageView iv = new ImageView(this);
             iv.setLayoutParams(new LinearLayout.LayoutParams(dp(iconDp), dp(iconDp)));
             iv.setScaleType(ImageView.ScaleType.FIT_CENTER);
             iv.setImageBitmap(shapedIcon(app.icon, dp(iconDp), sm.getIconShape()));
             cell.addView(iv);
-            row.addView(cell);
+            pill.addView(cell);
             cell.setOnClickListener(new View.OnClickListener() {
-                @Override public void onClick(View v) { launchApp(app); }
+                @Override public void onClick(View v) {
+                    v.animate().scaleX(0.88f).scaleY(0.88f).setDuration(70).withEndAction(new Runnable() {
+                        @Override public void run() { v.animate().scaleX(1f).scaleY(1f).setDuration(100).start(); }
+                    }).start();
+                    launchApp(app);
+                }
             });
             cell.setOnLongClickListener(new View.OnLongClickListener() {
                 @Override public boolean onLongClick(View v) { showAppMenu(app, v); return true; }
             });
         }
-        hsv.addView(row);
-        dockWrap.addView(hsv);
+        dockWrap.addView(pill);
         return dockWrap;
     }
 
@@ -1258,6 +1270,164 @@ public class MainActivity extends Activity {
     }
 
     private void openSettings() { startActivity(new Intent(this, SettingsActivity.class)); }
+
+    // ─── Home long press menu ─────────────────────────────────────────────
+
+    private void showHomeLongPressMenu() {
+        final Dialog dialog = new Dialog(this);
+        dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
+        dialog.getWindow().setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
+        dialog.getWindow().setDimAmount(0.3f);
+
+        LinearLayout sheet = new LinearLayout(this);
+        sheet.setOrientation(LinearLayout.VERTICAL);
+        GradientDrawable sheetBg = new GradientDrawable();
+        sheetBg.setColor(0xEE0D0D14);
+        sheetBg.setCornerRadius(dp(20));
+        sheetBg.setStroke(1, 0x22FFFFFF);
+        sheet.setBackground(sheetBg);
+        sheet.setPadding(0, dp(8), 0, dp(8));
+
+        int screenW = getResources().getDisplayMetrics().widthPixels;
+        dialog.getWindow().setGravity(Gravity.CENTER);
+        WindowManager.LayoutParams wlp = dialog.getWindow().getAttributes();
+        wlp.width = Math.min(dp(280), screenW - dp(40));
+        wlp.height = ViewGroup.LayoutParams.WRAP_CONTENT;
+        dialog.getWindow().setAttributes(wlp);
+
+        sheet.addView(makeMenuRow(dialog, "Launcher Settings", sm.getAccentColor(), new Runnable() {
+            public void run() { openSettings(); }
+        }));
+        sheet.addView(makeDivider());
+        sheet.addView(makeMenuRow(dialog, "Add Widget", 0xCCFFFFFF, new Runnable() {
+            public void run() { launchWidgetPicker(); }
+        }));
+        sheet.addView(makeDivider());
+        sheet.addView(makeMenuRow(dialog, "Wallpaper", 0xCCFFFFFF, new Runnable() {
+            public void run() {
+                Intent wp = new Intent(Intent.ACTION_SET_WALLPAPER);
+                startActivity(Intent.createChooser(wp, "Choose wallpaper"));
+            }
+        }));
+
+        dialog.setContentView(sheet);
+        dialog.show();
+    }
+
+    // ─── AppWidget area ───────────────────────────────────────────────────
+
+    private View buildAppWidgetArea() {
+        widgetContainer = new LinearLayout(this);
+        widgetContainer.setOrientation(LinearLayout.VERTICAL);
+        widgetContainer.setPadding(dp(16), dp(4), dp(16), 0);
+
+        List<Integer> ids = getSavedWidgetIds();
+        for (final int wid : ids) {
+            android.appwidget.AppWidgetProviderInfo info = appWidgetManager.getAppWidgetInfo(wid);
+            if (info == null) { removeWidgetId(wid); continue; }
+            android.appwidget.AppWidgetHostView hv = appWidgetHost.createView(this, wid, info);
+            hv.setAppWidget(wid, info);
+            int minH = Math.max(info.minHeight, dp(100));
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, minH);
+            lp.setMargins(0, 0, 0, dp(8));
+            hv.setLayoutParams(lp);
+            final int widgetId = wid;
+            hv.setOnLongClickListener(new View.OnLongClickListener() {
+                @Override public boolean onLongClick(View v) {
+                    confirmRemoveWidget(widgetId);
+                    return true;
+                }
+            });
+            widgetContainer.addView(hv);
+        }
+        return widgetContainer;
+    }
+
+    private void launchWidgetPicker() {
+        pendingWidgetId = appWidgetHost.allocateAppWidgetId();
+        Intent pick = new Intent(android.appwidget.AppWidgetManager.ACTION_APPWIDGET_PICK);
+        pick.putExtra(android.appwidget.AppWidgetManager.EXTRA_APPWIDGET_ID, pendingWidgetId);
+        startActivityForResult(pick, REQ_PICK_WIDGET);
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == REQ_PICK_WIDGET) {
+            if (resultCode == RESULT_OK && data != null) {
+                int id = data.getIntExtra(android.appwidget.AppWidgetManager.EXTRA_APPWIDGET_ID, pendingWidgetId);
+                android.appwidget.AppWidgetProviderInfo info = appWidgetManager.getAppWidgetInfo(id);
+                if (info != null && info.configure != null) {
+                    // needs config step — bind first
+                    Intent cfg = new Intent(android.appwidget.AppWidgetManager.ACTION_APPWIDGET_CONFIGURE);
+                    cfg.setComponent(info.configure);
+                    cfg.putExtra(android.appwidget.AppWidgetManager.EXTRA_APPWIDGET_ID, id);
+                    try { startActivityForResult(cfg, REQ_BIND_WIDGET); }
+                    catch (Exception e) { addWidgetId(id); adapter = null; buildUI(); }
+                } else {
+                    addWidgetId(id);
+                    adapter = null;
+                    buildUI();
+                }
+            } else {
+                if (pendingWidgetId >= 0) appWidgetHost.deleteAppWidgetId(pendingWidgetId);
+                pendingWidgetId = -1;
+            }
+        } else if (requestCode == REQ_BIND_WIDGET) {
+            if (pendingWidgetId >= 0) addWidgetId(pendingWidgetId);
+            adapter = null;
+            buildUI();
+        }
+    }
+
+    private List<Integer> getSavedWidgetIds() {
+        String s = sm.getWidgetIds();
+        List<Integer> ids = new ArrayList<Integer>();
+        if (s == null || s.isEmpty()) return ids;
+        for (String part : s.split(",")) {
+            try { ids.add(Integer.parseInt(part.trim())); } catch (Exception ignored) {}
+        }
+        return ids;
+    }
+
+    private void addWidgetId(int id) {
+        List<Integer> ids = getSavedWidgetIds();
+        ids.add(id);
+        saveWidgetIds(ids);
+        pendingWidgetId = -1;
+    }
+
+    private void removeWidgetId(int id) {
+        List<Integer> ids = getSavedWidgetIds();
+        java.util.Iterator<Integer> it = ids.iterator();
+        while (it.hasNext()) { if (it.next() == id) { it.remove(); break; } }
+        appWidgetHost.deleteAppWidgetId(id);
+        saveWidgetIds(ids);
+    }
+
+    private void saveWidgetIds(List<Integer> ids) {
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < ids.size(); i++) {
+            if (i > 0) sb.append(",");
+            sb.append(ids.get(i));
+        }
+        sm.set(SettingsManager.KEY_WIDGET_IDS, sb.toString());
+    }
+
+    private void confirmRemoveWidget(final int id) {
+        android.app.AlertDialog.Builder b = new android.app.AlertDialog.Builder(this);
+        b.setMessage("Remove this widget?");
+        b.setPositiveButton("Remove", new android.content.DialogInterface.OnClickListener() {
+            public void onClick(android.content.DialogInterface d, int w) {
+                removeWidgetId(id);
+                adapter = null;
+                buildUI();
+            }
+        });
+        b.setNegativeButton("Cancel", null);
+        b.show();
+    }
 
     // ─── Clock ────────────────────────────────────────────────────────────
 
