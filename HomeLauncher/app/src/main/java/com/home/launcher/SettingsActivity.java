@@ -309,6 +309,45 @@ public class SettingsActivity extends Activity {
         });
         root.addView(launcherCard);
 
+        // ── UPDATES card ────────────────────────────────────────────────
+        LinearLayout updatesCard = startCard();
+        addSectionLabel(updatesCard, "Updates");
+        addInfoRow(updatesCard, "Current version", String.valueOf(UpdateManager.CURRENT_VERSION));
+        addDivider(updatesCard);
+
+        final TextView updateStatusTv = new TextView(this);
+        updateStatusTv.setText("Tap to check for a newer version");
+        updateStatusTv.setTextColor(0x66FFFFFF);
+        updateStatusTv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
+        updateStatusTv.setPadding(dp(16), dp(4), dp(16), dp(8));
+        updatesCard.addView(updateStatusTv);
+
+        addActionButton(updatesCard, "Check for Updates", new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                updateStatusTv.setText("Checking...");
+                updateStatusTv.setTextColor(0x88FFFFFF);
+                final UpdateManager um = new UpdateManager(SettingsActivity.this);
+                um.checkForUpdate(new UpdateManager.CheckCallback() {
+                    @Override public void onResult(Boolean available, int serverVer) {
+                        if (available == null) {
+                            updateStatusTv.setText("Could not reach update server. Check your internet connection.");
+                            updateStatusTv.setTextColor(0x88FFFFFF);
+                        } else if (available) {
+                            updateStatusTv.setText("Version " + serverVer + " available! Downloading...");
+                            updateStatusTv.setTextColor(sm.getAccentColor());
+                            um.downloadAndInstall();
+                        } else {
+                            updateStatusTv.setText("You are on the latest version (" + UpdateManager.CURRENT_VERSION + ").");
+                            updateStatusTv.setTextColor(0x88FFFFFF);
+                        }
+                    }
+                });
+            }
+        });
+        addDivider(updatesCard);
+        addInfoRow(updatesCard, "Update source", "GitHub: yardendaskall-arch/Idk");
+        root.addView(updatesCard);
+
         // ── ABOUT card ──────────────────────────────────────────────────
         LinearLayout aboutCard = startCard();
         addSectionLabel(aboutCard, "About");

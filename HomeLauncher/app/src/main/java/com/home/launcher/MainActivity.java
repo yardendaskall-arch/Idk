@@ -142,6 +142,7 @@ public class MainActivity extends Activity {
     @Override protected void onDestroy() {
         super.onDestroy();
         try { unregisterReceiver(packageReceiver); } catch (Exception ignored) {}
+        try { appWidgetHost.stopListening(); } catch (Exception ignored) {}
     }
 
     @Override protected void onResume() {
@@ -152,6 +153,19 @@ public class MainActivity extends Activity {
         buildUI();
         startClock();
         registerReceiver(timeReceiver, new IntentFilter(Intent.ACTION_TIME_TICK));
+        // Auto-check for updates once per day (silent — only acts if update found)
+        long now = System.currentTimeMillis();
+        if (now - sm.getLastUpdateCheck() > 86400000L) {
+            sm.setLastUpdateCheck(now);
+            final UpdateManager um = new UpdateManager(this);
+            um.checkForUpdate(new UpdateManager.CheckCallback() {
+                @Override public void onResult(Boolean available, int serverVer) {
+                    if (available != null && available) {
+                        showUpdatePrompt(serverVer, um);
+                    }
+                }
+            });
+        }
     }
 
     @Override protected void onPause() {
@@ -1270,6 +1284,17 @@ public class MainActivity extends Activity {
     }
 
     private void openSettings() { startActivity(new Intent(this, SettingsActivity.class)); }
+
+    private void showUpdatePrompt(int serverVer, final UpdateManager um) {
+        new android.app.AlertDialog.Builder(this)
+            .setTitle("Update Available")
+            .setMessage("Version " + serverVer + " is available (you have " + UpdateManager.CURRENT_VERSION + "). Download now?")
+            .setPositiveButton("Update", new android.content.DialogInterface.OnClickListener() {
+                public void onClick(android.content.DialogInterface d, int w) { um.downloadAndInstall(); }
+            })
+            .setNegativeButton("Later", null)
+            .show();
+    }
 
     // ─── Home long press menu ─────────────────────────────────────────────
 
