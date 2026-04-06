@@ -221,6 +221,67 @@ public class SettingsActivity extends Activity {
 
         root.addView(appearCard);
 
+        // ── LOCK SCREEN card ─────────────────────────────────────────────
+        LinearLayout lockCard = startCard();
+        addSectionLabel(lockCard, "Lock Screen");
+
+        addToggle(lockCard, "Custom lock screen", sm.lockScreenEnabled(),
+            new CompoundButton.OnCheckedChangeListener() {
+                public void onCheckedChanged(CompoundButton b, boolean c) {
+                    sm.set(SettingsManager.KEY_LOCK_SCREEN_ENABLED, c);
+                }});
+
+        addDivider(lockCard);
+        addSubLabel(lockCard, "Lock screen background");
+        lockCard.addView(makeLockBgPicker());
+        root.addView(lockCard);
+
+        // ── WIDGETS card ──────────────────────────────────────────────────
+        LinearLayout widgetsCard = startCard();
+        addSectionLabel(widgetsCard, "Widgets");
+
+        addToggle(widgetsCard, "Show widget row", sm.showWidgets(),
+            new CompoundButton.OnCheckedChangeListener() {
+                public void onCheckedChanged(CompoundButton b, boolean c) {
+                    sm.set(SettingsManager.KEY_SHOW_WIDGETS, c);
+                }});
+        addDivider(widgetsCard);
+        addToggle(widgetsCard, "Calendar widget", sm.widgetCalendar(),
+            new CompoundButton.OnCheckedChangeListener() {
+                public void onCheckedChanged(CompoundButton b, boolean c) {
+                    sm.set(SettingsManager.KEY_WIDGET_CALENDAR, c);
+                }});
+        addDivider(widgetsCard);
+        addToggle(widgetsCard, "Battery widget", sm.widgetBattery(),
+            new CompoundButton.OnCheckedChangeListener() {
+                public void onCheckedChanged(CompoundButton b, boolean c) {
+                    sm.set(SettingsManager.KEY_WIDGET_BATTERY, c);
+                }});
+        addDivider(widgetsCard);
+        addToggle(widgetsCard, "Notes widget", sm.widgetNotes(),
+            new CompoundButton.OnCheckedChangeListener() {
+                public void onCheckedChanged(CompoundButton b, boolean c) {
+                    sm.set(SettingsManager.KEY_WIDGET_NOTES, c);
+                }});
+        root.addView(widgetsCard);
+
+        // ── GESTURES card ─────────────────────────────────────────────────
+        LinearLayout gesturesCard = startCard();
+        addSectionLabel(gesturesCard, "Gestures");
+
+        addThreeWay(gesturesCard, "Swipe up",
+            new String[]{"Off", "Search", "Notifs"}, sm.getSwipeUpAction(),
+            new ChoiceCallback() { public void onSelect(int i) {
+                sm.set(SettingsManager.KEY_SWIPE_UP_ACTION, i);
+            }});
+        addDivider(gesturesCard);
+        addSeekRow(gesturesCard, "Grid spacing", 0, 2, sm.getGridPadding(),
+            new int[]{0, 1, 2},
+            new SeekCallback() { public void onValue(int v) {
+                sm.set(SettingsManager.KEY_GRID_PADDING, v);
+            }});
+        root.addView(gesturesCard);
+
         // ── LAUNCHER card ────────────────────────────────────────────────
         LinearLayout launcherCard = startCard();
         addSectionLabel(launcherCard, "Launcher");
@@ -627,6 +688,65 @@ public class SettingsActivity extends Activity {
             });
         }
         return row;
+    }
+
+    private View makeLockBgPicker() {
+        HorizontalScrollView hsv = new HorizontalScrollView(this);
+        hsv.setPadding(dp(12), dp(8), dp(12), dp(16));
+
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+
+        final int current = sm.getLockScreenBg();
+        final View[] circles = new View[SettingsManager.LOCK_BG_PRESETS.length];
+        final TextView[] nameViews = new TextView[SettingsManager.LOCK_BG_PRESETS.length];
+
+        for (int i = 0; i < SettingsManager.LOCK_BG_PRESETS.length; i++) {
+            final int idx = i;
+            LinearLayout cell = new LinearLayout(this);
+            cell.setOrientation(LinearLayout.VERTICAL);
+            cell.setGravity(Gravity.CENTER);
+            cell.setPadding(dp(6), 0, dp(6), 0);
+
+            View circle = new View(this);
+            int size = dp(52);
+            circle.setLayoutParams(new LinearLayout.LayoutParams(size, size));
+            GradientDrawable gd = new GradientDrawable(
+                GradientDrawable.Orientation.TL_BR,
+                new int[]{SettingsManager.LOCK_BG_PRESETS[i][0], SettingsManager.LOCK_BG_PRESETS[i][1]});
+            gd.setCornerRadius(dp(26));
+            if (i == current) gd.setStroke(dp(3), accent);
+            circle.setBackground(gd);
+            circles[i] = circle;
+
+            TextView name = new TextView(this);
+            name.setText(SettingsManager.LOCK_BG_NAMES[i]);
+            name.setTextColor(i == current ? accent : 0x66FFFFFF);
+            name.setTextSize(TypedValue.COMPLEX_UNIT_SP, 9);
+            name.setGravity(Gravity.CENTER);
+            name.setPadding(0, dp(4), 0, 0);
+            nameViews[i] = name;
+
+            circle.setOnClickListener(new View.OnClickListener() {
+                @Override public void onClick(View v) {
+                    sm.set(SettingsManager.KEY_LOCK_SCREEN_BG, idx);
+                    for (int j = 0; j < circles.length; j++) {
+                        GradientDrawable d = new GradientDrawable(
+                            GradientDrawable.Orientation.TL_BR,
+                            new int[]{SettingsManager.LOCK_BG_PRESETS[j][0], SettingsManager.LOCK_BG_PRESETS[j][1]});
+                        d.setCornerRadius(dp(26));
+                        if (j == idx) d.setStroke(dp(3), accent);
+                        circles[j].setBackground(d);
+                        nameViews[j].setTextColor(j == idx ? accent : 0x66FFFFFF);
+                    }
+                }
+            });
+            cell.addView(circle);
+            cell.addView(name);
+            row.addView(cell);
+        }
+        hsv.addView(row);
+        return hsv;
     }
 
     @Override

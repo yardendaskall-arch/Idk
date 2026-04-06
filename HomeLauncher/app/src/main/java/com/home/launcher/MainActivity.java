@@ -2,12 +2,14 @@ package com.home.launcher;
 
 import android.app.Activity;
 import android.app.Dialog;
+import android.app.KeyguardManager;
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
+import android.os.BatteryManager;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Color;
@@ -93,6 +95,9 @@ public class MainActivity extends Activity {
     private Handler clockHandler = new Handler();
     private Runnable clockRunnable;
     private float touchDownY;
+    private KeyguardManager km;
+    private boolean showingLock = false;
+    private TextView lockClockView, lockDateView;
 
     private static final String[] CATEGORIES = {
         "ALL", "GAMES", "SOCIAL", "MEDIA", "TOOLS", "BROWSER",
@@ -109,12 +114,12 @@ public class MainActivity extends Activity {
         requestWindowFeature(Window.FEATURE_NO_TITLE);
         getWindow().addFlags(
             WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN |
-            WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED |
-            WindowManager.LayoutParams.FLAG_DISMISS_KEYGUARD);
+            WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED);
         getWindow().getDecorView().setSystemUiVisibility(
             View.SYSTEM_UI_FLAG_LAYOUT_STABLE | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN |
             View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION);
         sm = new SettingsManager(this);
+        km = (KeyguardManager) getSystemService(KEYGUARD_SERVICE);
         // Register package receiver for the lifetime of this activity
         IntentFilter pkgFilter = new IntentFilter(Intent.ACTION_PACKAGE_REMOVED);
         pkgFilter.addDataScheme("package");
@@ -144,8 +149,21 @@ public class MainActivity extends Activity {
 
     @Override public boolean onTouchEvent(MotionEvent e) {
         if (e.getAction() == MotionEvent.ACTION_DOWN) touchDownY = e.getY();
-        if (e.getAction() == MotionEvent.ACTION_UP)
-            if ((e.getY() - touchDownY) > dp(60) && touchDownY < dp(120)) expandNotifications();
+        if (e.getAction() == MotionEvent.ACTION_UP) {
+            float dy = touchDownY - e.getY(); // positive = swipe up
+            float downDy = e.getY() - touchDownY; // positive = swipe down
+            // Swipe down from top = notifications (legacy)
+            if (downDy > dp(60) && touchDownY < dp(120)) expandNotifications();
+            // Swipe up anywhere
+            if (dy > dp(80)) {
+                int action = sm.getSwipeUpAction();
+                if (action == 1 && searchBar != null) {
+                    searchBar.requestFocus();
+                } else if (action == 2) {
+                    expandNotifications();
+                }
+            }
+        }
         return super.onTouchEvent(e);
     }
 
@@ -161,27 +179,39 @@ public class MainActivity extends Activity {
     // ─── Build UI ─────────────────────────────────────────────────────────
 
     private void buildUI() {
+        showingLock = sm.lockScreenEnabled() && km != null && km.isKeyguardLocked();
+
+        rootFrame = new FrameLayout(this);
+
+        if (showingLock) {
+            buildLockUI();
+            setContentView(rootFrame);
+            return;
+        }
+
+        // Clear any previously set dismiss-keyguard flag when returning to home
+        getWindow().clearFlags(WindowManager.LayoutParams.FLAG_DISMISS_KEYGUARD);
+
         if (sm.useSystemWallpaper())
             getWindow().addFlags(WindowManager.LayoutParams.FLAG_SHOW_WALLPAPER);
         else
             getWindow().clearFlags(WindowManager.LayoutParams.FLAG_SHOW_WALLPAPER);
 
-        rootFrame = new FrameLayout(this);
         applyBackground();
         rootFrame.setOnLongClickListener(new View.OnLongClickListener() {
             @Override public boolean onLongClick(View v) { openSettings(); return true; }
         });
 
-        // Main vertical layout
         LinearLayout content = new LinearLayout(this);
         content.setOrientation(LinearLayout.VERTICAL);
 
         if (!isDefaultLauncher()) content.addView(buildSetupBanner());
         content.addView(buildClockSection());
         if (sm.showSearch() && !sm.searchBottom()) content.addView(buildSearchSection());
-        content.addView(buildGrid());   // weight=1 expands grid
-        if (sm.showSearch() && sm.searchBottom())  content.addView(buildSearchSection());
-        content.addView(buildFilterBar());   // category + A-Z at bottom
+        if (sm.showWidgets()) content.addView(buildWidgetRow());
+        content.addView(buildGrid());
+        if (sm.showSearch() && sm.searchBottom()) content.addView(buildSearchSection());
+        content.addView(buildFilterBar());
         if (sm.dockEnabled()) content.addView(buildDock());
 
         rootFrame.addView(content, new FrameLayout.LayoutParams(
@@ -190,6 +220,409 @@ public class MainActivity extends Activity {
         setContentView(rootFrame);
         updateClock();
         loadApps();
+    }
+
+    // ─── Lock screen ──────────────────────────────────────────────────────
+
+    private void buildLockUI() {
+        int bgIdx = sm.getLockScreenBg();
+        int[][] presets = SettingsManager.LOCK_BG_PRESETS;
+        int[] colors = presets[Math.min(bgIdx, presets.length - 1)];
+        GradientDrawable lockBg = new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, colors);
+        rootFrame.setBackground(lockBg);
+        int accent = sm.getAccentColor();
+
+        // Swipe-up touch on root to unlock
+        rootFrame.setOnTouchListener(new View.OnTouchListener() {
+            private float downY;
+            @Override public boolean onTouch(View v, MotionEvent e) {
+                if (e.getAction() == MotionEvent.ACTION_DOWN) { downY = e.getY(); return true; }
+                if (e.getAction() == MotionEvent.ACTION_UP) {
+                    if (downY - e.getY() > dp(80)) {
+                        unlockAndShowHome();
+                        return true;
+                    }
+                }
+                return true;
+            }
+        });
+
+        // Full-height vertical layout
+        LinearLayout lock = new LinearLayout(this);
+        lock.setOrientation(LinearLayout.VERTICAL);
+        lock.setGravity(Gravity.CENTER_HORIZONTAL);
+        rootFrame.addView(lock, new FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
+
+        // ── Top spacer
+        View topSpacer = new View(this);
+        lock.addView(topSpacer, new LinearLayout.LayoutParams(0, 0, 1f));
+
+        // ── Clock block
+        LinearLayout clockBlock = new LinearLayout(this);
+        clockBlock.setOrientation(LinearLayout.VERTICAL);
+        clockBlock.setGravity(Gravity.CENTER);
+        clockBlock.setPadding(dp(32), 0, dp(32), 0);
+
+        lockClockView = new TextView(this);
+        lockClockView.setTextColor(0xFFFFFFFF);
+        lockClockView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 88);
+        lockClockView.setTypeface(Typeface.create("sans-serif-thin", Typeface.NORMAL));
+        lockClockView.setGravity(Gravity.CENTER);
+        lockClockView.setLetterSpacing(-0.05f);
+        lockClockView.setShadowLayer(dp(20), 0, dp(4), 0x33000000);
+        clockBlock.addView(lockClockView);
+
+        lockDateView = new TextView(this);
+        lockDateView.setTextColor(0x99FFFFFF);
+        lockDateView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
+        lockDateView.setLetterSpacing(0.15f);
+        lockDateView.setGravity(Gravity.CENTER);
+        lockDateView.setPadding(0, dp(4), 0, dp(24));
+        clockBlock.addView(lockDateView);
+
+        // Thin accent line under date
+        View accentLine = new View(this);
+        accentLine.setBackgroundColor(accent);
+        LinearLayout.LayoutParams lineLp = new LinearLayout.LayoutParams(dp(48), dp(2));
+        lineLp.gravity = Gravity.CENTER_HORIZONTAL;
+        accentLine.setLayoutParams(lineLp);
+        clockBlock.addView(accentLine);
+
+        lock.addView(clockBlock);
+
+        // ── Battery widget
+        lock.addView(buildLockBatteryView(accent));
+
+        // ── Bottom spacer
+        View botSpacer = new View(this);
+        lock.addView(botSpacer, new LinearLayout.LayoutParams(0, 0, 1f));
+
+        // ── Swipe hint at bottom
+        LinearLayout hint = new LinearLayout(this);
+        hint.setOrientation(LinearLayout.VERTICAL);
+        hint.setGravity(Gravity.CENTER);
+        hint.setPadding(0, dp(8), 0, dp(48));
+
+        View upChevron = new View(this) {
+            @Override protected void onDraw(Canvas canvas) {
+                Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
+                p.setColor(0x66FFFFFF);
+                p.setStrokeWidth(dp(2));
+                p.setStyle(Paint.Style.STROKE);
+                p.setStrokeCap(Paint.Cap.ROUND);
+                float cx = getWidth() / 2f;
+                float cy = getHeight() / 2f;
+                float sz = dp(12);
+                android.graphics.Path path = new android.graphics.Path();
+                path.moveTo(cx - sz, cy + sz / 2f);
+                path.lineTo(cx, cy - sz / 2f);
+                path.lineTo(cx + sz, cy + sz / 2f);
+                canvas.drawPath(path, p);
+            }
+        };
+        upChevron.setLayoutParams(new LinearLayout.LayoutParams(dp(40), dp(24)));
+
+        TextView swipeTv = new TextView(this);
+        swipeTv.setText("SWIPE UP TO UNLOCK");
+        swipeTv.setTextColor(0x55FFFFFF);
+        swipeTv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 10);
+        swipeTv.setLetterSpacing(0.2f);
+        swipeTv.setGravity(Gravity.CENTER);
+        swipeTv.setPadding(0, dp(6), 0, 0);
+
+        hint.addView(upChevron);
+        hint.addView(swipeTv);
+        lock.addView(hint);
+
+        updateLockClock();
+    }
+
+    private View buildLockBatteryView(int accent) {
+        Intent battIntent = registerReceiver(null, new IntentFilter(Intent.ACTION_BATTERY_CHANGED));
+        int level = battIntent != null ? battIntent.getIntExtra(BatteryManager.EXTRA_LEVEL, -1) : -1;
+        int scale = battIntent != null ? battIntent.getIntExtra(BatteryManager.EXTRA_SCALE, -1) : -1;
+        int pct = (level >= 0 && scale > 0) ? (level * 100 / scale) : 50;
+        boolean charging = battIntent != null &&
+            battIntent.getIntExtra(BatteryManager.EXTRA_STATUS, -1) == BatteryManager.BATTERY_STATUS_CHARGING;
+
+        LinearLayout bv = new LinearLayout(this);
+        bv.setOrientation(LinearLayout.VERTICAL);
+        bv.setGravity(Gravity.CENTER);
+        bv.setPadding(dp(48), dp(32), dp(48), 0);
+
+        // Battery bar track
+        FrameLayout track = new FrameLayout(this);
+        LinearLayout.LayoutParams trackLp = new LinearLayout.LayoutParams(dp(200), dp(4));
+        trackLp.gravity = Gravity.CENTER_HORIZONTAL;
+        track.setLayoutParams(trackLp);
+        GradientDrawable trackBg = new GradientDrawable();
+        trackBg.setColor(0x22FFFFFF);
+        trackBg.setCornerRadius(dp(2));
+        track.setBackground(trackBg);
+
+        // Battery fill
+        View fill = new View(this);
+        int fillColor = pct > 20 ? (charging ? accent : 0xFF6BCB77) : 0xFFFF5555;
+        GradientDrawable fillBg = new GradientDrawable();
+        fillBg.setColor(fillColor);
+        fillBg.setCornerRadius(dp(2));
+        FrameLayout.LayoutParams fillLp = new FrameLayout.LayoutParams(
+            (int)(dp(200) * pct / 100f), FrameLayout.LayoutParams.MATCH_PARENT);
+        fill.setLayoutParams(fillLp);
+        fill.setBackground(fillBg);
+        track.addView(fill);
+        bv.addView(track);
+
+        // Percentage text
+        TextView pctTv = new TextView(this);
+        pctTv.setText(pct + "%" + (charging ? "  CHARGING" : ""));
+        pctTv.setTextColor(0x66FFFFFF);
+        pctTv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 10);
+        pctTv.setLetterSpacing(0.12f);
+        pctTv.setGravity(Gravity.CENTER);
+        pctTv.setPadding(0, dp(8), 0, 0);
+        bv.addView(pctTv);
+
+        return bv;
+    }
+
+    private void unlockAndShowHome() {
+        getWindow().addFlags(WindowManager.LayoutParams.FLAG_DISMISS_KEYGUARD);
+        showingLock = false;
+        adapter = null;
+        buildUI();
+    }
+
+    private void updateLockClock() {
+        if (lockClockView == null) return;
+        Date now = new Date();
+        String fmt = sm.is24h() ? "HH:mm" : "h:mm";
+        lockClockView.setText(new SimpleDateFormat(fmt, Locale.getDefault()).format(now));
+        if (lockDateView != null)
+            lockDateView.setText(
+                new SimpleDateFormat("EEEE  \u2022  MMMM d", Locale.getDefault())
+                    .format(now).toUpperCase(Locale.getDefault()));
+    }
+
+    // ─── Widget row ───────────────────────────────────────────────────────
+
+    private View buildWidgetRow() {
+        HorizontalScrollView hsv = new HorizontalScrollView(this);
+        hsv.setHorizontalScrollBarEnabled(false);
+        hsv.setPadding(dp(12), dp(4), dp(12), dp(4));
+
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setPadding(0, 0, 0, dp(4));
+
+        if (sm.widgetCalendar()) row.addView(buildCalendarWidget());
+        if (sm.widgetBattery())  row.addView(buildBatteryWidget());
+        if (sm.widgetNotes())    row.addView(buildNotesWidget());
+
+        hsv.addView(row);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        lp.setMargins(0, 0, 0, dp(2));
+        hsv.setLayoutParams(lp);
+        return hsv;
+    }
+
+    private LinearLayout makeWidgetCard(int widthDp, int heightDp) {
+        LinearLayout card = new LinearLayout(this);
+        card.setOrientation(LinearLayout.VERTICAL);
+        card.setGravity(Gravity.CENTER);
+        card.setPadding(dp(14), dp(12), dp(14), dp(12));
+        GradientDrawable bg = new GradientDrawable();
+        bg.setColor(0x14FFFFFF);
+        bg.setCornerRadius(dp(16));
+        bg.setStroke(1, 0x1EFFFFFF);
+        card.setBackground(bg);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(widthDp), dp(heightDp));
+        lp.setMargins(0, 0, dp(10), 0);
+        card.setLayoutParams(lp);
+        return card;
+    }
+
+    private View buildCalendarWidget() {
+        LinearLayout card = makeWidgetCard(120, 100);
+        Date now = new Date();
+        int accent = sm.getAccentColor();
+
+        TextView monthTv = new TextView(this);
+        monthTv.setText(new SimpleDateFormat("MMM", Locale.getDefault()).format(now).toUpperCase(Locale.getDefault()));
+        monthTv.setTextColor(accent);
+        monthTv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 10);
+        monthTv.setLetterSpacing(0.14f);
+        monthTv.setGravity(Gravity.CENTER);
+
+        TextView dayTv = new TextView(this);
+        dayTv.setText(new SimpleDateFormat("d", Locale.getDefault()).format(now));
+        dayTv.setTextColor(0xFFFFFFFF);
+        dayTv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 34);
+        dayTv.setTypeface(Typeface.create("sans-serif-light", Typeface.NORMAL));
+        dayTv.setGravity(Gravity.CENTER);
+        dayTv.setPadding(0, dp(2), 0, dp(2));
+
+        TextView weekTv = new TextView(this);
+        weekTv.setText(new SimpleDateFormat("EEE", Locale.getDefault()).format(now).toUpperCase(Locale.getDefault()));
+        weekTv.setTextColor(0x55FFFFFF);
+        weekTv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 9);
+        weekTv.setLetterSpacing(0.1f);
+        weekTv.setGravity(Gravity.CENTER);
+
+        card.addView(monthTv);
+        card.addView(dayTv);
+        card.addView(weekTv);
+        return card;
+    }
+
+    private View buildBatteryWidget() {
+        Intent battIntent = registerReceiver(null, new IntentFilter(Intent.ACTION_BATTERY_CHANGED));
+        int level = battIntent != null ? battIntent.getIntExtra(BatteryManager.EXTRA_LEVEL, -1) : -1;
+        int scale = battIntent != null ? battIntent.getIntExtra(BatteryManager.EXTRA_SCALE, -1) : -1;
+        int pct   = (level >= 0 && scale > 0) ? (level * 100 / scale) : 0;
+        boolean charging = battIntent != null &&
+            battIntent.getIntExtra(BatteryManager.EXTRA_STATUS, -1) == BatteryManager.BATTERY_STATUS_CHARGING;
+        int accent = sm.getAccentColor();
+
+        LinearLayout card = makeWidgetCard(120, 100);
+
+        TextView labelTv = new TextView(this);
+        labelTv.setText(charging ? "CHARGING" : "BATTERY");
+        labelTv.setTextColor(charging ? accent : 0x55FFFFFF);
+        labelTv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 9);
+        labelTv.setLetterSpacing(0.14f);
+        labelTv.setGravity(Gravity.CENTER);
+
+        TextView pctTv = new TextView(this);
+        pctTv.setText(pct + "%");
+        pctTv.setTextColor(0xFFFFFFFF);
+        pctTv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 30);
+        pctTv.setTypeface(Typeface.create("sans-serif-light", Typeface.NORMAL));
+        pctTv.setGravity(Gravity.CENTER);
+        pctTv.setPadding(0, dp(4), 0, dp(6));
+
+        // Mini bar
+        FrameLayout track = new FrameLayout(this);
+        track.setLayoutParams(new LinearLayout.LayoutParams(dp(72), dp(3)));
+        GradientDrawable trackBg = new GradientDrawable();
+        trackBg.setColor(0x22FFFFFF);
+        trackBg.setCornerRadius(dp(2));
+        track.setBackground(trackBg);
+        View fill = new View(this);
+        int fillColor = pct > 20 ? (charging ? accent : 0xFF6BCB77) : 0xFFFF5555;
+        GradientDrawable fillBg = new GradientDrawable();
+        fillBg.setColor(fillColor);
+        fillBg.setCornerRadius(dp(2));
+        fill.setLayoutParams(new FrameLayout.LayoutParams((int)(dp(72) * pct / 100f), FrameLayout.LayoutParams.MATCH_PARENT));
+        fill.setBackground(fillBg);
+        track.addView(fill);
+
+        card.addView(labelTv);
+        card.addView(pctTv);
+        card.addView(track);
+        return card;
+    }
+
+    private View buildNotesWidget() {
+        final LinearLayout card = makeWidgetCard(160, 100);
+        final String note = sm.getNotesText();
+
+        TextView labelTv = new TextView(this);
+        labelTv.setText("NOTES");
+        labelTv.setTextColor(sm.getAccentColor());
+        labelTv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 9);
+        labelTv.setLetterSpacing(0.14f);
+        labelTv.setGravity(Gravity.CENTER);
+
+        final TextView noteTv = new TextView(this);
+        noteTv.setText(note.isEmpty() ? "tap to add" : note);
+        noteTv.setTextColor(note.isEmpty() ? 0x44FFFFFF : 0xCCFFFFFF);
+        noteTv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
+        noteTv.setMaxLines(3);
+        noteTv.setPadding(0, dp(6), 0, 0);
+
+        card.addView(labelTv);
+        card.addView(noteTv);
+        card.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) { showNoteEditor(); }
+        });
+        return card;
+    }
+
+    private void showNoteEditor() {
+        final Dialog dialog = new Dialog(this);
+        dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
+        dialog.getWindow().setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
+
+        LinearLayout layout = new LinearLayout(this);
+        layout.setOrientation(LinearLayout.VERTICAL);
+        layout.setPadding(dp(20), dp(20), dp(20), dp(20));
+        GradientDrawable bg = new GradientDrawable();
+        bg.setColor(0xFF17161F);
+        bg.setCornerRadius(dp(16));
+        bg.setStroke(1, 0x33FFFFFF);
+        layout.setBackground(bg);
+
+        TextView title = new TextView(this);
+        title.setText("QUICK NOTE");
+        title.setTextColor(sm.getAccentColor());
+        title.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11);
+        title.setLetterSpacing(0.14f);
+        title.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
+
+        final EditText et = new EditText(this);
+        et.setText(sm.getNotesText());
+        et.setTextColor(0xEEFFFFFF);
+        et.setHintTextColor(0x44FFFFFF);
+        et.setHint("Write something...");
+        et.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
+        et.setMinLines(3);
+        et.setMaxLines(6);
+        GradientDrawable etBg = new GradientDrawable();
+        etBg.setColor(0x18FFFFFF);
+        etBg.setCornerRadius(dp(10));
+        et.setBackground(etBg);
+        et.setPadding(dp(12), dp(10), dp(12), dp(10));
+        LinearLayout.LayoutParams etLp = new LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        etLp.setMargins(0, dp(12), 0, dp(12));
+        et.setLayoutParams(etLp);
+
+        LinearLayout btnRow = new LinearLayout(this);
+        btnRow.setOrientation(LinearLayout.HORIZONTAL);
+        btnRow.setGravity(Gravity.END);
+
+        TextView saveBtn = new TextView(this);
+        saveBtn.setText("Save");
+        saveBtn.setTextColor(0xFF000000);
+        saveBtn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
+        saveBtn.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
+        saveBtn.setPadding(dp(20), dp(10), dp(20), dp(10));
+        GradientDrawable saveBg = new GradientDrawable();
+        saveBg.setColor(sm.getAccentColor());
+        saveBg.setCornerRadius(dp(20));
+        saveBtn.setBackground(saveBg);
+        saveBtn.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                sm.set(SettingsManager.KEY_NOTES_TEXT, et.getText().toString().trim());
+                dialog.dismiss();
+                adapter = null; buildUI();
+            }
+        });
+
+        btnRow.addView(saveBtn);
+        layout.addView(title);
+        layout.addView(et);
+        layout.addView(btnRow);
+        dialog.setContentView(layout);
+
+        WindowManager.LayoutParams wlp = dialog.getWindow().getAttributes();
+        wlp.width = dp(300);
+        dialog.getWindow().setAttributes(wlp);
+        dialog.show();
     }
 
     private boolean isDefaultLauncher() {
@@ -836,8 +1269,12 @@ public class MainActivity extends Activity {
     }
     private void stopClock() { if (clockRunnable != null) clockHandler.removeCallbacks(clockRunnable); }
     private void updateClock() {
-        if (clockView == null) return;
         Date now = new Date();
+        if (showingLock) {
+            updateLockClock();
+            return;
+        }
+        if (clockView == null) return;
         String fmt = sm.is24h() ? (sm.showSeconds() ? "HH:mm:ss" : "HH:mm") : (sm.showSeconds() ? "h:mm:ss a" : "h:mm a");
         clockView.setText(new SimpleDateFormat(fmt, Locale.getDefault()).format(now));
         if (dateView != null && sm.showDate())

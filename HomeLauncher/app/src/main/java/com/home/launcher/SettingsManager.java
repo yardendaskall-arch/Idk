@@ -25,8 +25,18 @@ public class SettingsManager {
     static final String KEY_USE_SYSTEM_WP       = "use_system_wp";
     static final String KEY_WP_DIM              = "wp_dim";
     static final String KEY_DOCK_ENABLED        = "dock_enabled";
-    static final String KEY_DOCK_PACKAGES       = "dock_packages";
-    static final String KEY_CUSTOM_WP_URI       = "custom_wp_uri";
+    static final String KEY_DOCK_PACKAGES        = "dock_packages";
+    static final String KEY_CUSTOM_WP_URI        = "custom_wp_uri";
+    static final String KEY_LOCK_SCREEN_ENABLED  = "lock_screen_enabled";
+    static final String KEY_LOCK_SCREEN_BG       = "lock_screen_bg";
+    static final String KEY_SHOW_WIDGETS         = "show_widgets";
+    static final String KEY_WIDGET_BATTERY       = "widget_battery";
+    static final String KEY_WIDGET_CALENDAR      = "widget_calendar";
+    static final String KEY_WIDGET_NOTES         = "widget_notes";
+    static final String KEY_NOTES_TEXT           = "notes_text";
+    static final String KEY_GRID_PADDING         = "grid_padding";
+    static final String KEY_SWIPE_UP_ACTION      = "swipe_up_action"; // 0=off 1=search 2=notifications
+    static final String KEY_DOUBLE_TAP_PKG       = "double_tap_pkg";
 
     static final int[][] BG_PRESETS = {
         {0xFF0F0C29, 0xFF24243E}, // Deep Purple
@@ -84,6 +94,25 @@ public class SettingsManager {
     public boolean dockEnabled()         { return prefs.getBoolean(KEY_DOCK_ENABLED, true); }
     public String  getDockPackages()     { return prefs.getString(KEY_DOCK_PACKAGES, ""); }
     public String  getCustomWpUri()      { return prefs.getString(KEY_CUSTOM_WP_URI, ""); }
+    public boolean lockScreenEnabled()   { return prefs.getBoolean(KEY_LOCK_SCREEN_ENABLED, true); }
+    public int     getLockScreenBg()     { return prefs.getInt(KEY_LOCK_SCREEN_BG, 0); }
+    public boolean showWidgets()         { return prefs.getBoolean(KEY_SHOW_WIDGETS, true); }
+    public boolean widgetBattery()       { return prefs.getBoolean(KEY_WIDGET_BATTERY, true); }
+    public boolean widgetCalendar()      { return prefs.getBoolean(KEY_WIDGET_CALENDAR, true); }
+    public boolean widgetNotes()         { return prefs.getBoolean(KEY_WIDGET_NOTES, false); }
+    public String  getNotesText()        { return prefs.getString(KEY_NOTES_TEXT, ""); }
+    public int     getGridPadding()      { return prefs.getInt(KEY_GRID_PADDING, 1); }
+    public int     getSwipeUpAction()    { return prefs.getInt(KEY_SWIPE_UP_ACTION, 1); }
+    public String  getDoubleTapPkg()     { return prefs.getString(KEY_DOUBLE_TAP_PKG, ""); }
+
+    // Lock screen BG presets (darker/minimal subset)
+    static final int[][] LOCK_BG_PRESETS = {
+        {0xFF000000, 0xFF050505}, // Pure Black
+        {0xFF030308, 0xFF0A0A1A}, // Deep Navy
+        {0xFF0A0005, 0xFF15001A}, // Deep Purple
+        {0xFF000A05, 0xFF001A0A}, // Deep Green
+    };
+    static final String[] LOCK_BG_NAMES = { "Black", "Navy", "Violet", "Forest" };
 
     public void set(String key, int val)     { prefs.edit().putInt(key, val).apply(); }
     public void set(String key, boolean val) { prefs.edit().putBoolean(key, val).apply(); }
