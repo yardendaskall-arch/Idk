@@ -1638,23 +1638,51 @@ public class MainActivity extends Activity {
         wlp.height = ViewGroup.LayoutParams.WRAP_CONTENT;
         dialog.getWindow().setAttributes(wlp);
 
-        sheet.addView(makeMenuRow(dialog, "Launcher Settings", sm.getAccentColor(), new Runnable() {
-            public void run() { openSettings(); }
-        }));
-        sheet.addView(makeDivider());
         sheet.addView(makeMenuRow(dialog, "Add Widget", 0xCCFFFFFF, new Runnable() {
             public void run() { launchWidgetPicker(); }
         }));
         sheet.addView(makeDivider());
-        sheet.addView(makeMenuRow(dialog, "Wallpaper", 0xCCFFFFFF, new Runnable() {
-            public void run() {
-                Intent wp = new Intent(Intent.ACTION_SET_WALLPAPER);
-                startActivity(Intent.createChooser(wp, "Choose wallpaper"));
-            }
+        sheet.addView(makeMenuRow(dialog, "Delete Widget", 0xCCFFFFFF, new Runnable() {
+            public void run() { showDeleteWidgetPicker(dialog); }
+        }));
+        sheet.addView(makeDivider());
+        sheet.addView(makeMenuRow(dialog, "Launcher Settings", sm.getAccentColor(), new Runnable() {
+            public void run() { openSettings(); }
         }));
 
         dialog.setContentView(sheet);
         dialog.show();
+    }
+
+    private void showDeleteWidgetPicker(Dialog parentDialog) {
+        List<Integer> ids = getSavedWidgetIds();
+        if (ids.isEmpty()) {
+            android.widget.Toast.makeText(this, "No widgets to remove", android.widget.Toast.LENGTH_SHORT).show();
+            return;
+        }
+        if (ids.size() == 1) {
+            parentDialog.dismiss();
+            confirmRemoveWidget(ids.get(0));
+            return;
+        }
+        // Multiple widgets — show a list
+        final String[] labels = new String[ids.size()];
+        for (int i = 0; i < ids.size(); i++) {
+            int wid = ids.get(i);
+            android.appwidget.AppWidgetProviderInfo info = appWidgetManager.getAppWidgetInfo(wid);
+            labels[i] = (info != null) ? info.loadLabel(getPackageManager()) : "Widget " + wid;
+        }
+        final List<Integer> finalIds = ids;
+        parentDialog.dismiss();
+        new android.app.AlertDialog.Builder(this)
+            .setTitle("Remove widget")
+            .setItems(labels, new android.content.DialogInterface.OnClickListener() {
+                public void onClick(android.content.DialogInterface d, int which) {
+                    confirmRemoveWidget(finalIds.get(which));
+                }
+            })
+            .setNegativeButton("Cancel", null)
+            .show();
     }
 
     // ══════════════════════════════════════════════════════════════════════

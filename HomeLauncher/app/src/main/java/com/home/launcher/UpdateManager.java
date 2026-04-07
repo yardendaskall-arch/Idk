@@ -17,13 +17,13 @@ import java.net.URL;
 
 public class UpdateManager {
 
-    // Raw GitHub URLs — update these if you rename the branch/repo
+    // Raw GitHub URLs — refs/heads/ format handles branch names that contain slashes
     static final String APK_URL =
-        "https://raw.githubusercontent.com/yardendaskall-arch/Idk/claude/custom-home-ui-app-ueSMq/HomeLauncher/HomeLauncher-debug.apk";
+        "https://raw.githubusercontent.com/yardendaskall-arch/Idk/refs/heads/claude/custom-home-ui-app-ueSMq/HomeLauncher/HomeLauncher-debug.apk";
     static final String VERSION_URL =
-        "https://raw.githubusercontent.com/yardendaskall-arch/Idk/claude/custom-home-ui-app-ueSMq/HomeLauncher/version.txt";
+        "https://raw.githubusercontent.com/yardendaskall-arch/Idk/refs/heads/claude/custom-home-ui-app-ueSMq/HomeLauncher/version.txt";
 
-    static final int CURRENT_VERSION = 3;
+    static final int CURRENT_VERSION = 4;
 
     private final Activity activity;
     private final DownloadManager dm;
