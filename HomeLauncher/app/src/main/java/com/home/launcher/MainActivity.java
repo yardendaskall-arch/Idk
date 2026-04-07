@@ -602,73 +602,85 @@ public class MainActivity extends Activity {
             cell.addView(xBtn);
         }
 
-        // Touch listener for drag-to-reorder
+        // Unified touch handler: handles tap, long-press (enter edit mode), and drag-to-reorder
         cell.setOnTouchListener(new View.OnTouchListener() {
             private float downX, downY;
             private boolean dragging = false;
-            @Override public boolean onTouch(View v, MotionEvent e) {
-                if (e.getAction() == MotionEvent.ACTION_DOWN) {
-                    downX = e.getRawX(); downY = e.getRawY();
-                    dragging = false;
-                    return editMode; // only consume in edit mode
-                }
-                if (!editMode) return false;
-                if (e.getAction() == MotionEvent.ACTION_MOVE) {
-                    float dx = Math.abs(e.getRawX() - downX), dy = Math.abs(e.getRawY() - downY);
-                    if (!dragging && (dx > dp(10) || dy > dp(10))) {
-                        dragging = true;
-                        dragFromIdx = idx;
-                        startDragIcon(app, v, e);
-                        v.setVisibility(View.INVISIBLE);
-                    }
-                    if (dragging && dragGhost != null) {
-                        dragGhost.setX(e.getRawX() - dragGhost.getWidth() / 2f);
-                        dragGhost.setY(e.getRawY() - dragGhost.getHeight() / 2f);
-                        highlightDropTarget(e.getRawX(), e.getRawY());
-                    }
-                    return true;
-                }
-                if (e.getAction() == MotionEvent.ACTION_UP
-                        || e.getAction() == MotionEvent.ACTION_CANCEL) {
-                    if (dragging) {
-                        v.setVisibility(View.VISIBLE);
-                        if (dragGhost != null) {
-                            ((ViewGroup) dragGhost.getParent()).removeView(dragGhost);
-                            dragGhost = null;
-                        }
-                        if (dragFromIdx >= 0) {
-                            int toIdx = findDropIndex(e.getRawX(), e.getRawY());
-                            if (toIdx >= 0 && toIdx != dragFromIdx && toIdx < homeApps.size()) {
-                                AppInfo moved = homeApps.remove(dragFromIdx);
-                                homeApps.add(toIdx, moved);
-                                saveHomeApps();
+            private boolean longPressed = false;
+            private final android.os.Handler h = new android.os.Handler();
+            private Runnable longPressRunnable;
+
+            @Override public boolean onTouch(final View v, MotionEvent e) {
+                switch (e.getAction()) {
+                    case MotionEvent.ACTION_DOWN:
+                        downX = e.getRawX(); downY = e.getRawY();
+                        dragging = false; longPressed = false;
+                        longPressRunnable = new Runnable() {
+                            @Override public void run() {
+                                longPressed = true;
+                                v.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS);
+                                if (!editMode) enterEditMode();
+                            }
+                        };
+                        h.postDelayed(longPressRunnable,
+                            android.view.ViewConfiguration.getLongPressTimeout());
+                        return true;
+                    case MotionEvent.ACTION_MOVE:
+                        float dx = Math.abs(e.getRawX() - downX),
+                              dy = Math.abs(e.getRawY() - downY);
+                        if (!dragging && (dx > dp(10) || dy > dp(10))) {
+                            h.removeCallbacks(longPressRunnable);
+                            if (editMode) {
+                                dragging = true;
+                                dragFromIdx = idx;
+                                startDragIcon(app, v, e);
+                                v.setVisibility(View.INVISIBLE);
                             }
                         }
-                        dragFromIdx = -1;
-                        updateHomeGrid();
-                    }
-                    dragging = false;
-                    return true;
-                }
-                return true;
-            }
-        });
-
-        cell.setOnClickListener(new View.OnClickListener() {
-            @Override public void onClick(View v) {
-                if (editMode) { exitEditMode(); return; }
-                v.animate().scaleX(0.88f).scaleY(0.88f).setDuration(70)
-                    .withEndAction(new Runnable() {
-                        @Override public void run() {
-                            v.animate().scaleX(1f).scaleY(1f).setDuration(100).start();
+                        if (dragging && dragGhost != null) {
+                            dragGhost.setX(e.getRawX() - dragGhost.getWidth() / 2f);
+                            dragGhost.setY(e.getRawY() - dragGhost.getHeight() / 2f);
+                            highlightDropTarget(e.getRawX(), e.getRawY());
                         }
-                    }).start();
-                launchApp(app);
-            }
-        });
-        cell.setOnLongClickListener(new View.OnLongClickListener() {
-            @Override public boolean onLongClick(View v) {
-                if (!editMode) enterEditMode();
+                        return true;
+                    case MotionEvent.ACTION_UP:
+                    case MotionEvent.ACTION_CANCEL:
+                        h.removeCallbacks(longPressRunnable);
+                        if (dragging) {
+                            v.setVisibility(View.VISIBLE);
+                            if (dragGhost != null) {
+                                ((ViewGroup) dragGhost.getParent()).removeView(dragGhost);
+                                dragGhost = null;
+                            }
+                            if (dragFromIdx >= 0) {
+                                int toIdx = findDropIndex(e.getRawX(), e.getRawY());
+                                if (toIdx >= 0 && toIdx != dragFromIdx
+                                        && toIdx < homeApps.size()) {
+                                    AppInfo moved = homeApps.remove(dragFromIdx);
+                                    homeApps.add(toIdx, moved);
+                                    saveHomeApps();
+                                }
+                            }
+                            dragFromIdx = -1;
+                            updateHomeGrid();
+                        } else if (!longPressed) {
+                            // plain tap
+                            if (editMode) {
+                                exitEditMode();
+                            } else {
+                                v.animate().scaleX(0.88f).scaleY(0.88f).setDuration(70)
+                                    .withEndAction(new Runnable() {
+                                        @Override public void run() {
+                                            v.animate().scaleX(1f).scaleY(1f)
+                                                .setDuration(100).start();
+                                        }
+                                    }).start();
+                                launchApp(app);
+                            }
+                        }
+                        dragging = false;
+                        return true;
+                }
                 return true;
             }
         });
