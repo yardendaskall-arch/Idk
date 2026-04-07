@@ -73,10 +73,16 @@ public class MainActivity extends Activity {
     // ── Data ──────────────────────────────────────────────────────────────
     private List<AppInfo> allApps      = new ArrayList<AppInfo>();
     private List<AppInfo> filteredApps = new ArrayList<AppInfo>();
+    private List<AppInfo> homeApps     = new ArrayList<AppInfo>(); // ordered home screen apps
     private AppAdapter adapter;
     private SettingsManager sm;
     private int screenW, screenH;
     private int currentPage = 0;
+
+    // ── Edit / drag mode ──────────────────────────────────────────────────
+    private boolean editMode = false;
+    private int dragFromIdx  = -1;
+    private ImageView dragGhost = null;
 
     // ── Package receiver ──────────────────────────────────────────────────
     private String pendingUninstallPkg = null;
@@ -251,6 +257,11 @@ public class MainActivity extends Activity {
         stopClock();
         try { unregisterReceiver(timeReceiver); } catch (Exception ignored) {}
         try { appWidgetHost.stopListening(); }   catch (Exception ignored) {}
+    }
+
+    @Override public void onBackPressed() {
+        if (editMode) { exitEditMode(); return; }
+        // Launcher should stay — don't call super (would finish the activity)
     }
 
     // ══════════════════════════════════════════════════════════════════════
@@ -452,37 +463,264 @@ public class MainActivity extends Activity {
     }
 
     // ── Update home-page grid after apps load ─────────────────────────────
+    private void rebuildHomeApps() {
+        // Rebuild homeApps from allApps using saved package order
+        android.content.SharedPreferences prefs =
+            getSharedPreferences("home_apps", MODE_PRIVATE);
+        String saved = prefs.getString("packages", "");
+        homeApps.clear();
+        if (!saved.isEmpty()) {
+            String[] pkgs = saved.split(",");
+            for (String pkg : pkgs) {
+                for (AppInfo a : allApps) {
+                    if (a.packageName.equals(pkg)) { homeApps.add(a); break; }
+                }
+            }
+        }
+        // Seed with first cols*5 apps if empty
+        if (homeApps.isEmpty()) {
+            int cols = sm.getColumns();
+            int max  = cols * 5;
+            for (int i = 0; i < allApps.size() && i < max; i++) {
+                homeApps.add(allApps.get(i));
+            }
+            saveHomeApps();
+        }
+    }
+
+    private void saveHomeApps() {
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < homeApps.size(); i++) {
+            if (i > 0) sb.append(',');
+            sb.append(homeApps.get(i).packageName);
+        }
+        getSharedPreferences("home_apps", MODE_PRIVATE)
+            .edit().putString("packages", sb.toString()).apply();
+    }
+
     private void updateHomeGrid() {
         if (homeGrid == null) return;
         homeGrid.removeAllViews();
         int cols   = sm.getColumns();
         int iconDp = sm.getIconSizeDp();
-        int max    = cols * 5;
-        List<AppInfo> apps = filteredApps.size() > max
-            ? filteredApps.subList(0, max) : filteredApps;
+        // Each cell is a fixed square: full width divided by columns
+        int cellPx = screenW / cols;
 
-        for (int row = 0; row * cols < apps.size(); row++) {
+        for (int row = 0; row * cols < homeApps.size(); row++) {
             LinearLayout rowView = new LinearLayout(this);
             rowView.setOrientation(LinearLayout.HORIZONTAL);
             for (int col = 0; col < cols; col++) {
-                int idx = row * cols + col;
-                if (idx < apps.size()) {
-                    LinearLayout cell = buildIconCell(apps.get(idx), iconDp);
-                    cell.setLayoutParams(new LinearLayout.LayoutParams(0,
-                        ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
-                    rowView.addView(cell);
+                final int idx = row * cols + col;
+                if (idx < homeApps.size()) {
+                    View cell = buildHomeIconCell(homeApps.get(idx), iconDp, cellPx, idx);
+                    rowView.addView(cell, new LinearLayout.LayoutParams(cellPx, cellPx));
                 } else {
                     View empty = new View(this);
-                    empty.setLayoutParams(new LinearLayout.LayoutParams(0, dp(iconDp + 30), 1f));
-                    rowView.addView(empty);
+                    rowView.addView(empty, new LinearLayout.LayoutParams(cellPx, cellPx));
                 }
             }
-            LinearLayout.LayoutParams rowLp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-            rowLp.setMargins(0, 0, 0, dp(4));
-            rowView.setLayoutParams(rowLp);
-            homeGrid.addView(rowView);
+            homeGrid.addView(rowView, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         }
+
+        if (editMode) {
+            // Tap anywhere outside icons to exit
+            homeGrid.setOnClickListener(new View.OnClickListener() {
+                @Override public void onClick(View v) { exitEditMode(); }
+            });
+        } else {
+            homeGrid.setOnClickListener(null);
+        }
+    }
+
+    private View buildHomeIconCell(final AppInfo app, int iconDp, int cellPx, final int idx) {
+        FrameLayout cell = new FrameLayout(this);
+        int iconPx = Math.min(dp(iconDp), cellPx - dp(16));
+
+        LinearLayout inner = new LinearLayout(this);
+        inner.setOrientation(LinearLayout.VERTICAL);
+        inner.setGravity(Gravity.CENTER_HORIZONTAL | Gravity.TOP);
+        inner.setPadding(dp(2), dp(8), dp(2), dp(4));
+
+        final ImageView iv = new ImageView(this);
+        iv.setLayoutParams(new LinearLayout.LayoutParams(iconPx, iconPx));
+        iv.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        iv.setImageBitmap(shapedIcon(app.icon, iconPx, sm.getIconShape()));
+        if (editMode) {
+            // wiggle
+            iv.animate().rotation(3f).setDuration(120).withEndAction(new Runnable() {
+                @Override public void run() {
+                    iv.animate().rotation(-3f).setDuration(120).withEndAction(new Runnable() {
+                        @Override public void run() { iv.animate().rotation(0f).setDuration(80).start(); }
+                    }).start();
+                }
+            }).start();
+        }
+        inner.addView(iv);
+
+        if (sm.showLabels()) {
+            TextView label = new TextView(this);
+            label.setText(app.label);
+            label.setGravity(Gravity.CENTER);
+            label.setTextColor(0xEEFFFFFF);
+            label.setTextSize(TypedValue.COMPLEX_UNIT_SP, sm.getLabelSizeSp());
+            label.setMaxLines(1);
+            label.setEllipsize(TextUtils.TruncateAt.END);
+            label.setPadding(0, dp(2), 0, 0);
+            label.setShadowLayer(dp(4), 0, dp(1), 0x99000000);
+            inner.addView(label, new LinearLayout.LayoutParams(cellPx - dp(4),
+                ViewGroup.LayoutParams.WRAP_CONTENT));
+        }
+
+        cell.addView(inner, new FrameLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+
+        // X badge in edit mode
+        if (editMode) {
+            TextView xBtn = new TextView(this);
+            xBtn.setText("✕");
+            xBtn.setTextColor(0xFFFFFFFF);
+            xBtn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 10);
+            xBtn.setGravity(Gravity.CENTER);
+            GradientDrawable xBg = new GradientDrawable();
+            xBg.setShape(GradientDrawable.OVAL);
+            xBg.setColor(0xCC333333);
+            xBtn.setBackground(xBg);
+            int xSz = dp(18);
+            FrameLayout.LayoutParams xLp = new FrameLayout.LayoutParams(xSz, xSz);
+            xLp.gravity = Gravity.TOP | Gravity.END;
+            xLp.topMargin = dp(4);
+            xLp.rightMargin = dp(4);
+            xBtn.setLayoutParams(xLp);
+            xBtn.setOnClickListener(new View.OnClickListener() {
+                @Override public void onClick(View v) {
+                    homeApps.remove(idx);
+                    saveHomeApps();
+                    updateHomeGrid();
+                }
+            });
+            cell.addView(xBtn);
+        }
+
+        // Touch listener for drag-to-reorder
+        cell.setOnTouchListener(new View.OnTouchListener() {
+            private float downX, downY;
+            private boolean dragging = false;
+            @Override public boolean onTouch(View v, MotionEvent e) {
+                if (e.getAction() == MotionEvent.ACTION_DOWN) {
+                    downX = e.getRawX(); downY = e.getRawY();
+                    dragging = false;
+                    return editMode; // only consume in edit mode
+                }
+                if (!editMode) return false;
+                if (e.getAction() == MotionEvent.ACTION_MOVE) {
+                    float dx = Math.abs(e.getRawX() - downX), dy = Math.abs(e.getRawY() - downY);
+                    if (!dragging && (dx > dp(10) || dy > dp(10))) {
+                        dragging = true;
+                        dragFromIdx = idx;
+                        startDragIcon(app, v, e);
+                        v.setVisibility(View.INVISIBLE);
+                    }
+                    if (dragging && dragGhost != null) {
+                        dragGhost.setX(e.getRawX() - dragGhost.getWidth() / 2f);
+                        dragGhost.setY(e.getRawY() - dragGhost.getHeight() / 2f);
+                        highlightDropTarget(e.getRawX(), e.getRawY());
+                    }
+                    return true;
+                }
+                if (e.getAction() == MotionEvent.ACTION_UP
+                        || e.getAction() == MotionEvent.ACTION_CANCEL) {
+                    if (dragging) {
+                        v.setVisibility(View.VISIBLE);
+                        if (dragGhost != null) {
+                            ((ViewGroup) dragGhost.getParent()).removeView(dragGhost);
+                            dragGhost = null;
+                        }
+                        if (dragFromIdx >= 0) {
+                            int toIdx = findDropIndex(e.getRawX(), e.getRawY());
+                            if (toIdx >= 0 && toIdx != dragFromIdx && toIdx < homeApps.size()) {
+                                AppInfo moved = homeApps.remove(dragFromIdx);
+                                homeApps.add(toIdx, moved);
+                                saveHomeApps();
+                            }
+                        }
+                        dragFromIdx = -1;
+                        updateHomeGrid();
+                    }
+                    dragging = false;
+                    return true;
+                }
+                return true;
+            }
+        });
+
+        cell.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                if (editMode) { exitEditMode(); return; }
+                v.animate().scaleX(0.88f).scaleY(0.88f).setDuration(70)
+                    .withEndAction(new Runnable() {
+                        @Override public void run() {
+                            v.animate().scaleX(1f).scaleY(1f).setDuration(100).start();
+                        }
+                    }).start();
+                launchApp(app);
+            }
+        });
+        cell.setOnLongClickListener(new View.OnLongClickListener() {
+            @Override public boolean onLongClick(View v) {
+                if (!editMode) enterEditMode();
+                return true;
+            }
+        });
+        return cell;
+    }
+
+    private void startDragIcon(AppInfo app, View source, MotionEvent e) {
+        int sz = dp(sm.getIconSizeDp());
+        dragGhost = new ImageView(MainActivity.this);
+        dragGhost.setImageBitmap(shapedIcon(app.icon, sz, sm.getIconShape()));
+        dragGhost.setAlpha(0.85f);
+        FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(sz, sz);
+        dragGhost.setLayoutParams(lp);
+        dragGhost.setX(e.getRawX() - sz / 2f);
+        dragGhost.setY(e.getRawY() - sz / 2f);
+        rootFrame.addView(dragGhost);
+    }
+
+    private void highlightDropTarget(float rawX, float rawY) {
+        // Visual feedback can be added here if needed
+    }
+
+    private int findDropIndex(float rawX, float rawY) {
+        if (homeGrid == null) return -1;
+        int cols = sm.getColumns();
+        int cellPx = screenW / cols;
+        int[] loc = new int[2];
+        homeGrid.getLocationOnScreen(loc);
+        float relX = rawX - loc[0];
+        float relY = rawY - loc[1];
+        int col = (int)(relX / cellPx);
+        int row = (int)(relY / cellPx);
+        col = Math.max(0, Math.min(col, cols - 1));
+        int rows = (homeApps.size() + cols - 1) / cols;
+        row = Math.max(0, Math.min(row, rows - 1));
+        int idx = row * cols + col;
+        return Math.min(idx, homeApps.size() - 1);
+    }
+
+    private void enterEditMode() {
+        editMode = true;
+        updateHomeGrid();
+    }
+
+    private void exitEditMode() {
+        editMode = false;
+        if (dragGhost != null) {
+            ((ViewGroup) dragGhost.getParent()).removeView(dragGhost);
+            dragGhost = null;
+        }
+        dragFromIdx = -1;
+        updateHomeGrid();
     }
 
     private LinearLayout buildIconCell(final AppInfo app, int iconDp) {
@@ -1172,6 +1410,7 @@ public class MainActivity extends Activity {
                 adapter.notifyDataSetChanged();
             }
         }
+        rebuildHomeApps();
         updateHomeGrid();
     }
 
