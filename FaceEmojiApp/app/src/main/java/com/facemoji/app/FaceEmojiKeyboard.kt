@@ -11,8 +11,6 @@ import android.util.TypedValue
 import android.view.*
 import android.widget.*
 import androidx.core.content.FileProvider
-import androidx.core.view.InputCompat
-import androidx.core.view.ViewCompat
 import java.io.File
 
 /**
