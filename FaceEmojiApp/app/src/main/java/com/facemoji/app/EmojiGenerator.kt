@@ -3,375 +3,339 @@ package com.facemoji.app
 import android.graphics.*
 import com.google.mlkit.vision.face.Face
 import com.google.mlkit.vision.face.FaceLandmark
+import kotlin.math.abs
+import kotlin.math.sqrt
 
 /**
- * Draws a custom emoji that looks like the detected face.
+ * Draws a custom emoji in the flat, bold style of standard Unicode emojis
+ * (Apple / Google / WhatsApp aesthetic).
  *
- * Uses:
- *  - Face bounding box + landmark positions to place features
- *  - Cheek pixels → skin tone
- *  - Above-face pixels  → hair colour
- *  - smilingProbability → mouth curve
- *  - eyeOpenProbability → eye openness
+ * Personalisation comes from:
+ *  • Fitzpatrick skin tone  — detected from cheek pixels
+ *  • Hair colour            — detected from above the bounding box
+ *  • Eye openness           — from leftEyeOpen / rightEyeOpen probability
+ *  • Expression             — from smilingProbability + mouth landmarks
+ *  • Blush marks            — fade in when smiling > 50 %
  */
 class EmojiGenerator {
 
     companion object {
         private const val SIZE = 512
+
+        // Standard Fitzpatrick emoji skin tones (the 6 used in Unicode)
+        private val SKIN_TONES = intArrayOf(
+            0xFFFFD93D.toInt(), // default yellow
+            0xFFFDCBAA.toInt(), // light
+            0xFFF1C27D.toInt(), // medium-light
+            0xFFE0AC69.toInt(), // medium
+            0xFFC68642.toInt(), // medium-dark
+            0xFF8D5524.toInt()  // dark
+        )
+
+        // Simplified hair colours
+        private val HAIR_COLOURS = intArrayOf(
+            0xFF1A1A1A.toInt(), // black
+            0xFF3B2314.toInt(), // dark brown
+            0xFF7B4F2E.toInt(), // brown
+            0xFFB8860B.toInt(), // dark blonde
+            0xFFDAA520.toInt(), // blonde
+            0xFFB05E2A.toInt(), // auburn/red
+            0xFFA8A8A8.toInt(), // grey
+            0xFFFFFFFF.toInt()  // white
+        )
+
+        private val OUTLINE = Color.parseColor("#1A1A1A")
+        private val WHITE   = Color.WHITE
+        private val IRIS    = Color.parseColor("#3D6BBF")
+        private val PUPIL   = Color.parseColor("#1A1A1A")
+        private val LIP     = Color.parseColor("#7A1818")
+        private val BLUSH   = Color.parseColor("#FF6B8A")
     }
 
     fun generate(face: Face, src: Bitmap): Bitmap {
         val out    = Bitmap.createBitmap(SIZE, SIZE, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(out)
+        val paint  = Paint(Paint.ANTI_ALIAS_FLAG)
 
-        val bounds  = face.boundingBox
-        val faceCX  = bounds.exactCenterX()
-        val faceCY  = bounds.exactCenterY()
-        val faceW   = bounds.width().toFloat()
+        val bounds = face.boundingBox
+        val faceCX = bounds.exactCenterX()
+        val faceCY = bounds.exactCenterY()
+        val faceW  = bounds.width().toFloat()
 
-        // Radius of the emoji circle on the output canvas
-        val r  = SIZE * 0.40f
+        val r  = SIZE * 0.42f
         val cx = SIZE / 2f
         val cy = SIZE / 2f
 
-        // Map a landmark (absolute image coords) into emoji canvas coords
-        fun pt(lm: FaceLandmark?): PointF? {
-            lm ?: return null
+        // Convert a face landmark's image position → emoji canvas position
+        fun lm(type: Int): PointF? {
+            val lm = face.getLandmark(type) ?: return null
             val nx = (lm.position.x - faceCX) / faceW
             val ny = (lm.position.y - faceCY) / faceW
-            return PointF(cx + nx * SIZE * 0.78f, cy + ny * SIZE * 0.78f)
+            return PointF(cx + nx * SIZE * 0.80f, cy + ny * SIZE * 0.80f)
         }
 
-        val smiling   = face.smilingProbability          ?: 0.5f
-        val leftOpen  = face.leftEyeOpenProbability      ?: 1f
-        val rightOpen = face.rightEyeOpenProbability     ?: 1f
+        val smiling   = face.smilingProbability       ?: 0.5f
+        val leftOpen  = face.leftEyeOpenProbability   ?: 1f
+        val rightOpen = face.rightEyeOpenProbability  ?: 1f
 
-        val leftEyePt  = pt(face.getLandmark(FaceLandmark.LEFT_EYE))  ?: PointF(cx - r * 0.36f, cy - r * 0.05f)
-        val rightEyePt = pt(face.getLandmark(FaceLandmark.RIGHT_EYE)) ?: PointF(cx + r * 0.36f, cy - r * 0.05f)
-        val nosePt     = pt(face.getLandmark(FaceLandmark.NOSE_BASE))
-        val mouthL     = pt(face.getLandmark(FaceLandmark.MOUTH_LEFT))
-        val mouthR     = pt(face.getLandmark(FaceLandmark.MOUTH_RIGHT))
-        val mouthB     = pt(face.getLandmark(FaceLandmark.MOUTH_BOTTOM))
-        val cheekL     = pt(face.getLandmark(FaceLandmark.LEFT_CHEEK))
-        val cheekR     = pt(face.getLandmark(FaceLandmark.RIGHT_CHEEK))
+        val leftEyePt  = lm(FaceLandmark.LEFT_EYE)   ?: PointF(cx - r * 0.34f, cy - r * 0.08f)
+        val rightEyePt = lm(FaceLandmark.RIGHT_EYE)  ?: PointF(cx + r * 0.34f, cy - r * 0.08f)
+        val nosePt     = lm(FaceLandmark.NOSE_BASE)
+        val mouthL     = lm(FaceLandmark.MOUTH_LEFT)
+        val mouthR     = lm(FaceLandmark.MOUTH_RIGHT)
+        val mouthB     = lm(FaceLandmark.MOUTH_BOTTOM)
+        val cheekL     = lm(FaceLandmark.LEFT_CHEEK)
+        val cheekR     = lm(FaceLandmark.RIGHT_CHEEK)
 
-        // ── Colours ──────────────────────────────────────────────────────────
-        val skinColor = extractSkinTone(src, bounds, cheekL, cheekR, cx, cy, r)
-        val skinDark  = darken(skinColor, 0.72f)
-        val hairColor = extractHairColor(src, bounds)
+        val skinColor = nearestSkinTone(extractAvg(src, bounds, cheekL, cheekR, cx, cy, r))
+        val hairColor = nearestHairColor(extractHair(src, bounds))
+        val outlineW  = SIZE * 0.030f   // thick black outline — key to emoji look
 
-        val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+        // ── 1. White base disc (gives clean edge to the yellow) ──────────────
+        paint.color = WHITE; paint.style = Paint.Style.FILL
+        canvas.drawCircle(cx, cy, r + outlineW / 2, paint)
 
-        // ── 1. Drop shadow ───────────────────────────────────────────────────
-        paint.color = Color.argb(50, 0, 0, 0)
-        paint.style = Paint.Style.FILL
-        canvas.drawCircle(cx + 8f, cy + 10f, r + 6f, paint)
-
-        // ── 2. Face circle ───────────────────────────────────────────────────
+        // ── 2. Face fill ──────────────────────────────────────────────────────
         paint.color = skinColor
         canvas.drawCircle(cx, cy, r, paint)
-        paint.color = skinDark
-        paint.style = Paint.Style.STROKE
-        paint.strokeWidth = SIZE * 0.013f
-        canvas.drawCircle(cx, cy, r, paint)
+
+        // ── 3. Black face outline ─────────────────────────────────────────────
+        paint.color = OUTLINE; paint.style = Paint.Style.STROKE; paint.strokeWidth = outlineW
+        canvas.drawCircle(cx, cy, r - outlineW / 2, paint)
         paint.style = Paint.Style.FILL
 
-        // ── 3. Hair cap ──────────────────────────────────────────────────────
-        drawHair(canvas, cx, cy, r, hairColor, paint)
+        // ── 4. Hair cap ────────────────────────────────────────────────────────
+        drawHairCap(canvas, cx, cy, r, hairColor, outlineW, paint)
 
-        // ── 4. Ears ──────────────────────────────────────────────────────────
-        drawEar(canvas, cx - r * 0.98f, cy + r * 0.05f, r * 0.18f, skinColor, skinDark, paint)
-        drawEar(canvas, cx + r * 0.98f, cy + r * 0.05f, r * 0.18f, skinColor, skinDark, paint)
+        // ── 5. Eyebrows ────────────────────────────────────────────────────────
+        drawEyebrow(canvas, leftEyePt,  r, smiling, isLeft = true,  hairColor, outlineW, paint)
+        drawEyebrow(canvas, rightEyePt, r, smiling, isLeft = false, hairColor, outlineW, paint)
 
-        // ── 5. Eyebrows ──────────────────────────────────────────────────────
-        val browColor = darken(hairColor, 0.55f)
-        drawEyebrow(canvas, leftEyePt,  r * 0.24f, r * 0.14f, smiling, isLeft = true,  browColor, paint)
-        drawEyebrow(canvas, rightEyePt, r * 0.24f, r * 0.14f, smiling, isLeft = false, browColor, paint)
+        // ── 6. Eyes ────────────────────────────────────────────────────────────
+        val eyeR = r * 0.145f
+        drawEye(canvas, leftEyePt,  eyeR, leftOpen,  outlineW, paint)
+        drawEye(canvas, rightEyePt, eyeR, rightOpen, outlineW, paint)
 
-        // ── 6. Eyes ──────────────────────────────────────────────────────────
-        drawEye(canvas, leftEyePt,  r * 0.126f, leftOpen,  paint)
-        drawEye(canvas, rightEyePt, r * 0.126f, rightOpen, paint)
+        // ── 7. Nose (two small dots — standard emoji style) ───────────────────
+        val noseC = nosePt ?: PointF(cx, cy + r * 0.14f)
+        val ndot  = r * 0.038f
+        paint.color = OUTLINE
+        canvas.drawCircle(noseC.x - r * 0.09f, noseC.y, ndot, paint)
+        canvas.drawCircle(noseC.x + r * 0.09f, noseC.y, ndot, paint)
 
-        // ── 7. Nose ──────────────────────────────────────────────────────────
-        val noseCenter = nosePt ?: PointF(cx, cy + r * 0.12f)
-        paint.color = skinDark
-        paint.style = Paint.Style.STROKE
-        paint.strokeWidth = SIZE * 0.009f
-        paint.strokeCap = Paint.Cap.ROUND
-        val nosePath = Path().apply {
-            moveTo(noseCenter.x - r * 0.055f, noseCenter.y - r * 0.04f)
-            quadTo(noseCenter.x - r * 0.09f,  noseCenter.y + r * 0.07f, noseCenter.x,              noseCenter.y + r * 0.05f)
-            quadTo(noseCenter.x + r * 0.09f,  noseCenter.y + r * 0.07f, noseCenter.x + r * 0.055f, noseCenter.y - r * 0.04f)
-        }
-        canvas.drawPath(nosePath, paint)
-        paint.style = Paint.Style.FILL
-
-        // ── 8. Mouth ─────────────────────────────────────────────────────────
-        val ml = mouthL ?: PointF(cx - r * 0.28f, cy + r * 0.40f)
-        val mr = mouthR ?: PointF(cx + r * 0.28f, cy + r * 0.40f)
+        // ── 8. Mouth ───────────────────────────────────────────────────────────
+        val ml = mouthL ?: PointF(cx - r * 0.30f, cy + r * 0.38f)
+        val mr = mouthR ?: PointF(cx + r * 0.30f, cy + r * 0.38f)
         val mb = mouthB ?: PointF(cx,              cy + r * 0.55f)
-        drawMouth(canvas, ml, mr, mb, smiling, r, paint)
+        drawMouth(canvas, ml, mr, mb, smiling, r, outlineW, paint)
 
-        // ── 9. Blush (when smiling) ──────────────────────────────────────────
+        // ── 9. Blush ───────────────────────────────────────────────────────────
         if (smiling > 0.45f) {
-            val alpha = ((smiling - 0.45f) / 0.55f * 90).toInt()
-            paint.color = Color.argb(alpha, 255, 90, 110)
-            val lc = cheekL ?: PointF(cx - r * 0.60f, cy + r * 0.24f)
-            val rc = cheekR ?: PointF(cx + r * 0.60f, cy + r * 0.24f)
-            canvas.drawOval(lc.x - r * 0.17f, lc.y - r * 0.09f, lc.x + r * 0.17f, lc.y + r * 0.09f, paint)
-            canvas.drawOval(rc.x - r * 0.17f, rc.y - r * 0.09f, rc.x + r * 0.17f, rc.y + r * 0.09f, paint)
+            val alpha = ((smiling - 0.45f) / 0.55f * 110).toInt().coerceIn(0, 110)
+            paint.color = Color.argb(alpha, Color.red(BLUSH), Color.green(BLUSH), Color.blue(BLUSH))
+            val lc = cheekL ?: PointF(cx - r * 0.62f, cy + r * 0.20f)
+            val rc = cheekR ?: PointF(cx + r * 0.62f, cy + r * 0.20f)
+            canvas.drawOval(lc.x - r * 0.19f, lc.y - r * 0.10f, lc.x + r * 0.19f, lc.y + r * 0.10f, paint)
+            canvas.drawOval(rc.x - r * 0.19f, rc.y - r * 0.10f, rc.x + r * 0.19f, rc.y + r * 0.10f, paint)
         }
 
         return out
     }
 
-    // ── Drawing helpers ──────────────────────────────────────────────────────
+    // ── Feature drawing ───────────────────────────────────────────────────────
 
-    private fun drawHair(canvas: Canvas, cx: Float, cy: Float, r: Float, color: Int, paint: Paint) {
-        // Hair = the part of a slightly-larger circle that sits above the hairline (~40 % up the face)
-        paint.color = color
-        paint.style = Paint.Style.FILL
-
-        val hairCircle = Path().apply { addCircle(cx, cy - r * 0.04f, r * 1.04f, Path.Direction.CW) }
-        val hairlineClip = Path().apply {
-            addRect(cx - r * 1.2f, cy - r * 1.2f, cx + r * 1.2f, cy - r * 0.28f, Path.Direction.CW)
+    private fun drawHairCap(
+        canvas: Canvas, cx: Float, cy: Float, r: Float,
+        color: Int, ow: Float, paint: Paint
+    ) {
+        // Hair = part of the face circle above the hairline (roughly top 40 %)
+        val hairlineY = cy - r * 0.26f
+        val clip = Path().apply {
+            addRect(cx - r - ow, cy - r - ow, cx + r + ow, hairlineY, Path.Direction.CW)
         }
-        val hair = Path()
-        hair.op(hairCircle, hairlineClip, Path.Op.INTERSECT)
-        canvas.drawPath(hair, paint)
-    }
+        val faceCircle = Path().apply { addCircle(cx, cy, r, Path.Direction.CW) }
+        val hair = Path().apply { op(faceCircle, clip, Path.Op.INTERSECT) }
 
-    private fun drawEar(canvas: Canvas, x: Float, y: Float, r: Float, skin: Int, dark: Int, paint: Paint) {
-        paint.color = skin
-        paint.style = Paint.Style.FILL
-        canvas.drawOval(x - r, y - r * 1.3f, x + r, y + r * 1.3f, paint)
-        paint.color = dark
-        paint.style = Paint.Style.STROKE
-        paint.strokeWidth = r * 0.2f
-        canvas.drawOval(x - r * 0.5f, y - r * 0.7f, x + r * 0.5f, y + r * 0.7f, paint)
+        paint.color = color; paint.style = Paint.Style.FILL
+        canvas.drawPath(hair, paint)
+        // Hairline outline
+        paint.color = OUTLINE; paint.style = Paint.Style.STROKE; paint.strokeWidth = ow * 0.85f
+        canvas.drawPath(hair, paint)
         paint.style = Paint.Style.FILL
     }
 
     private fun drawEyebrow(
-        canvas: Canvas, eyePos: PointF, halfW: Float, yOff: Float,
-        smiling: Float, isLeft: Boolean, color: Int, paint: Paint
+        canvas: Canvas, eyePos: PointF, r: Float, smiling: Float,
+        isLeft: Boolean, color: Int, ow: Float, paint: Paint
     ) {
+        val hw    = r * 0.22f
+        val baseY = eyePos.y - r * 0.20f
+        // Happy = flat; neutral/sad = inner corners slightly raised
+        val innerLift = if (smiling > 0.45f) 0f else r * 0.06f
+        val outerLift = if (smiling > 0.45f) 0f else -r * 0.03f
+
+        val (liftL, liftR) = if (isLeft) Pair(outerLift, innerLift) else Pair(innerLift, outerLift)
+
         paint.color = color
         paint.style = Paint.Style.STROKE
-        paint.strokeWidth = halfW * 0.28f
+        paint.strokeWidth = ow * 1.3f
         paint.strokeCap = Paint.Cap.ROUND
-
-        val baseY    = eyePos.y - yOff
-        // Slight inner-corner tilt based on expression
-        val tilt     = halfW * (if (smiling > 0.5f) -0.10f else 0.15f)
-        val innerDY  = if (isLeft) tilt  else -tilt
-        val outerDY  = if (isLeft) -tilt else  tilt
-
         val path = Path().apply {
-            moveTo(eyePos.x - halfW, baseY + outerDY)
-            quadTo(eyePos.x, baseY - halfW * 0.10f, eyePos.x + halfW, baseY + innerDY)
+            moveTo(eyePos.x - hw, baseY + liftL)
+            quadTo(eyePos.x, baseY - hw * 0.10f, eyePos.x + hw, baseY + liftR)
         }
         canvas.drawPath(path, paint)
         paint.style = Paint.Style.FILL
+        paint.strokeCap = Paint.Cap.BUTT
     }
 
-    private fun drawEye(canvas: Canvas, pos: PointF, r: Float, openProb: Float, paint: Paint) {
+    private fun drawEye(
+        canvas: Canvas, pos: PointF, r: Float, openProb: Float, ow: Float, paint: Paint
+    ) {
         if (openProb < 0.30f) {
-            // Closed / squinting — just a curved line
-            paint.color  = Color.parseColor("#2C2C2C")
-            paint.style  = Paint.Style.STROKE
-            paint.strokeWidth = r * 0.38f
-            paint.strokeCap   = Paint.Cap.ROUND
+            // Closed — single curved line (standard emoji 😌 style)
+            paint.color = OUTLINE
+            paint.style = Paint.Style.STROKE
+            paint.strokeWidth = ow * 1.1f
+            paint.strokeCap = Paint.Cap.ROUND
             val p = Path().apply {
                 moveTo(pos.x - r, pos.y)
-                quadTo(pos.x, pos.y - r * 0.30f, pos.x + r, pos.y)
+                quadTo(pos.x, pos.y - r * 0.35f, pos.x + r, pos.y)
             }
             canvas.drawPath(p, paint)
-            paint.style = Paint.Style.FILL
+            paint.style = Paint.Style.FILL; paint.strokeCap = Paint.Cap.BUTT
             return
         }
 
-        val vScale = openProb.coerceIn(0.40f, 1.0f)
+        val vScale = openProb.coerceIn(0.45f, 1.0f)
+        val rx = r; val ry = r * vScale
 
-        // White
-        paint.color = Color.WHITE
-        paint.style = Paint.Style.FILL
-        canvas.drawOval(pos.x - r, pos.y - r * vScale, pos.x + r, pos.y + r * vScale, paint)
-
-        // Iris (blue-grey)
-        val irisR = r * 0.60f
-        paint.color = Color.parseColor("#3A5FA0")
+        // White sclera
+        paint.color = WHITE; paint.style = Paint.Style.FILL
+        canvas.drawOval(pos.x - rx, pos.y - ry, pos.x + rx, pos.y + ry, paint)
+        // Iris
+        val irisR = rx * 0.58f
+        paint.color = IRIS
         canvas.drawCircle(pos.x, pos.y, irisR, paint)
-
         // Pupil
-        paint.color = Color.parseColor("#151515")
+        paint.color = PUPIL
         canvas.drawCircle(pos.x, pos.y, irisR * 0.54f, paint)
-
-        // Highlight
-        paint.color = Color.WHITE
-        canvas.drawCircle(pos.x + r * 0.23f, pos.y - r * 0.23f, r * 0.17f, paint)
-
-        // Outline
-        paint.color = Color.parseColor("#2C2C2C")
-        paint.style = Paint.Style.STROKE
-        paint.strokeWidth = r * 0.12f
-        canvas.drawOval(pos.x - r, pos.y - r * vScale, pos.x + r, pos.y + r * vScale, paint)
+        // Specular highlight (standard emoji feature)
+        paint.color = WHITE
+        canvas.drawCircle(pos.x + rx * 0.28f, pos.y - ry * 0.28f, rx * 0.19f, paint)
+        // Bold outline
+        paint.color = OUTLINE; paint.style = Paint.Style.STROKE; paint.strokeWidth = ow
+        canvas.drawOval(pos.x - rx, pos.y - ry, pos.x + rx, pos.y + ry, paint)
         paint.style = Paint.Style.FILL
     }
 
     private fun drawMouth(
         canvas: Canvas,
         ml: PointF, mr: PointF, mb: PointF,
-        smiling: Float, r: Float, paint: Paint
+        smiling: Float, r: Float, ow: Float, paint: Paint
     ) {
-        val midX = (ml.x + mr.x) / 2f
-        val midY = (ml.y + mr.y) / 2f
-
+        val midX  = (ml.x + mr.x) / 2f
+        val baseY = (ml.y + mr.y) / 2f
         paint.strokeCap = Paint.Cap.ROUND
-        val lipDark = Color.parseColor("#7A1818")
 
         when {
             smiling > 0.50f -> {
-                val depth = r * 0.26f * smiling
-
-                // Dark mouth interior
+                val depth = r * 0.30f * smiling
+                // Filled dark mouth
                 val mouth = Path().apply {
                     moveTo(ml.x, ml.y)
-                    quadTo(midX, midY + depth * 1.6f, mr.x, mr.y)
-                    quadTo(midX, midY + depth * 0.5f,  ml.x, ml.y)
+                    quadTo(midX, baseY + depth * 1.7f, mr.x, mr.y)
+                    quadTo(midX, baseY + depth * 0.55f, ml.x, ml.y)
                 }
-                paint.color = lipDark
-                paint.style = Paint.Style.FILL
+                paint.color = LIP; paint.style = Paint.Style.FILL
                 canvas.drawPath(mouth, paint)
-
-                // Teeth
+                // White teeth strip
                 val teeth = Path().apply {
                     moveTo(ml.x, ml.y)
-                    quadTo(midX, midY + depth * 0.4f, mr.x, mr.y)
-                    lineTo(mr.x, ml.y)
-                    close()
+                    quadTo(midX, baseY + depth * 0.42f, mr.x, mr.y)
+                    lineTo(mr.x, ml.y); close()
                 }
-                paint.color = Color.WHITE
+                paint.color = WHITE
                 canvas.drawPath(teeth, paint)
-
-                // Upper-lip line
-                paint.color = lipDark
-                paint.style = Paint.Style.STROKE
-                paint.strokeWidth = r * 0.048f
-                val line = Path().apply {
+                // Bold smile outline
+                paint.color = OUTLINE; paint.style = Paint.Style.STROKE; paint.strokeWidth = ow
+                val outline = Path().apply {
                     moveTo(ml.x, ml.y)
-                    quadTo(midX, midY + depth, mr.x, mr.y)
+                    quadTo(midX, baseY + depth, mr.x, mr.y)
                 }
-                canvas.drawPath(line, paint)
+                canvas.drawPath(outline, paint)
             }
-
             smiling > 0.25f -> {
-                val depth = r * 0.16f * smiling
-                paint.color = lipDark
-                paint.style = Paint.Style.STROKE
-                paint.strokeWidth = r * 0.052f
-                val line = Path().apply {
-                    moveTo(ml.x, ml.y)
-                    quadTo(midX, midY + depth, mr.x, mr.y)
-                }
-                canvas.drawPath(line, paint)
+                val d = r * 0.16f * smiling
+                paint.color = OUTLINE; paint.style = Paint.Style.STROKE; paint.strokeWidth = ow * 1.05f
+                val p = Path().apply { moveTo(ml.x, ml.y); quadTo(midX, baseY + d, mr.x, mr.y) }
+                canvas.drawPath(p, paint)
             }
-
             smiling < 0.15f -> {
-                // Slight frown
+                // Frown
                 val lift = r * 0.10f
-                paint.color = lipDark
-                paint.style = Paint.Style.STROKE
-                paint.strokeWidth = r * 0.050f
-                val line = Path().apply {
-                    moveTo(ml.x, ml.y)
-                    quadTo(midX, midY - lift, mr.x, mr.y)
-                }
-                canvas.drawPath(line, paint)
+                paint.color = OUTLINE; paint.style = Paint.Style.STROKE; paint.strokeWidth = ow * 1.05f
+                val p = Path().apply { moveTo(ml.x, ml.y); quadTo(midX, baseY - lift, mr.x, mr.y) }
+                canvas.drawPath(p, paint)
             }
-
             else -> {
-                // Neutral
-                paint.color = lipDark
-                paint.style = Paint.Style.STROKE
-                paint.strokeWidth = r * 0.048f
-                canvas.drawLine(ml.x, midY, mr.x, midY, paint)
+                paint.color = OUTLINE; paint.style = Paint.Style.STROKE; paint.strokeWidth = ow * 1.05f
+                canvas.drawLine(ml.x, baseY, mr.x, baseY, paint)
             }
         }
 
-        paint.style = Paint.Style.FILL
+        paint.style = Paint.Style.FILL; paint.strokeCap = Paint.Cap.BUTT
     }
 
-    // ── Colour extraction ────────────────────────────────────────────────────
+    // ── Colour helpers ────────────────────────────────────────────────────────
 
-    /**
-     * Samples pixels at both cheek landmarks (or centre of face) and returns a
-     * slightly warmed, cartoon-friendly average colour.
-     */
-    private fun extractSkinTone(
+    private fun extractAvg(
         bmp: Bitmap, bounds: Rect,
         cheekL: PointF?, cheekR: PointF?,
         cx: Float, cy: Float, r: Float
     ): Int {
-        val samples = mutableListOf<PointF>()
-
-        // Prefer actual cheek landmarks mapped back to image coords
-        fun addCheekSample(emojiPt: PointF?) {
-            emojiPt ?: return
-            // Convert emoji-canvas coords back to image coords (approximate)
-            val imgX = (bounds.exactCenterX() + (emojiPt.x - cx) / (SIZE * 0.78f) * bounds.width()).toInt()
-                .coerceIn(0, bmp.width - 1)
-            val imgY = (bounds.exactCenterY() + (emojiPt.y - cy) / (SIZE * 0.78f) * bounds.width()).toInt()
-                .coerceIn(0, bmp.height - 1)
-            samples.add(PointF(imgX.toFloat(), imgY.toFloat()))
+        val pts = mutableListOf<Pair<Int,Int>>()
+        fun addBmpPt(ep: PointF?) {
+            ep ?: return
+            val ix = (bounds.exactCenterX() + (ep.x - cx) / (SIZE * 0.80f) * bounds.width()).toInt().coerceIn(0, bmp.width-1)
+            val iy = (bounds.exactCenterY() + (ep.y - cy) / (SIZE * 0.80f) * bounds.width()).toInt().coerceIn(0, bmp.height-1)
+            pts += ix to iy
         }
-
-        if (cheekL != null && cheekR != null) {
-            addCheekSample(cheekL)
-            addCheekSample(cheekR)
-        } else {
-            // Fall back: sample a 5×5 grid from the centre of the face
-            val step = bounds.width() / 8
+        addBmpPt(cheekL); addBmpPt(cheekR)
+        if (pts.isEmpty()) {
+            val step = bounds.width() / 7
             for (dy in -1..1) for (dx in -1..1)
-                samples.add(PointF(
-                    (bounds.exactCenterX() + dx * step).coerceIn(0f, bmp.width - 1f),
-                    (bounds.exactCenterY() + dy * step).coerceIn(0f, bmp.height - 1f)
-                ))
+                pts += (bounds.centerX() + dx * step).coerceIn(0, bmp.width-1) to
+                       (bounds.centerY() + dy * step).coerceIn(0, bmp.height-1)
         }
-
-        var rSum = 0L; var gSum = 0L; var bSum = 0L
-        for (p in samples) {
-            val c = bmp.getPixel(p.x.toInt(), p.y.toInt())
-            rSum += Color.red(c); gSum += Color.green(c); bSum += Color.blue(c)
-        }
-        val n = samples.size.coerceAtLeast(1)
-        // Slight warm boost for cartoon look
-        return Color.rgb(
-            minOf(255, (rSum / n * 1.08).toInt()),
-            (gSum / n).toInt(),
-            (bSum / n * 0.88).toInt()
-        )
+        var rr = 0L; var gg = 0L; var bb = 0L
+        pts.forEach { (x, y) -> val c = bmp.getPixel(x, y); rr += Color.red(c); gg += Color.green(c); bb += Color.blue(c) }
+        return Color.rgb((rr / pts.size).toInt(), (gg / pts.size).toInt(), (bb / pts.size).toInt())
     }
 
-    /** Samples the area just above the face bounding box to detect hair colour. */
-    private fun extractHairColor(bmp: Bitmap, bounds: Rect): Int {
-        val cx   = bounds.exactCenterX().toInt()
-        val topY = (bounds.top - bounds.height() * 0.08f).toInt().coerceIn(0, bmp.height - 1)
-        val step = bounds.width() / 7
-
-        var rSum = 0L; var gSum = 0L; var bSum = 0L; var n = 0
+    private fun extractHair(bmp: Bitmap, bounds: Rect): Int {
+        val cx   = bounds.centerX()
+        val topY = (bounds.top - bounds.height() * 0.05f).toInt().coerceIn(0, bmp.height-1)
+        val step = bounds.width() / 8
+        var rr = 0L; var gg = 0L; var bb = 0L
         for (dx in -3..3) {
-            val px = (cx + dx * step).coerceIn(0, bmp.width - 1)
-            val c = bmp.getPixel(px, topY)
-            rSum += Color.red(c); gSum += Color.green(c); bSum += Color.blue(c); n++
+            val px = (cx + dx * step).coerceIn(0, bmp.width-1)
+            val c  = bmp.getPixel(px, topY)
+            rr += Color.red(c); gg += Color.green(c); bb += Color.blue(c)
         }
-        return if (n == 0) Color.parseColor("#3D2B1F")
-        else Color.rgb((rSum / n).toInt(), (gSum / n).toInt(), (bSum / n).toInt())
+        return Color.rgb((rr / 7).toInt(), (gg / 7).toInt(), (bb / 7).toInt())
     }
 
-    private fun darken(color: Int, f: Float) = Color.rgb(
-        (Color.red(color)   * f).toInt().coerceIn(0, 255),
-        (Color.green(color) * f).toInt().coerceIn(0, 255),
-        (Color.blue(color)  * f).toInt().coerceIn(0, 255)
-    )
+    private fun colorDist(a: Int, b: Int): Float {
+        val dr = (Color.red(a)   - Color.red(b)).toFloat()
+        val dg = (Color.green(a) - Color.green(b)).toFloat()
+        val db = (Color.blue(a)  - Color.blue(b)).toFloat()
+        return sqrt(dr*dr + dg*dg + db*db)
+    }
+
+    private fun nearestSkinTone(detected: Int) =
+        SKIN_TONES.minByOrNull { colorDist(it, detected) } ?: SKIN_TONES[0]
+
+    private fun nearestHairColor(detected: Int) =
+        HAIR_COLOURS.minByOrNull { colorDist(it, detected) } ?: HAIR_COLOURS[0]
 }

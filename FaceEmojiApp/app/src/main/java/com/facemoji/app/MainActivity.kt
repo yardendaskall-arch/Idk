@@ -1,12 +1,17 @@
 package com.facemoji.app
 
 import android.Manifest
+import android.content.ContentValues
 import android.content.pm.PackageManager
+import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Matrix
 import android.media.ExifInterface
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
+import android.os.Environment
+import android.provider.MediaStore
 import android.view.View
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
@@ -23,6 +28,7 @@ import com.google.mlkit.vision.face.FaceDetection
 import com.google.mlkit.vision.face.FaceDetector
 import com.google.mlkit.vision.face.FaceDetectorOptions
 import java.io.File
+import java.io.FileOutputStream
 import java.text.SimpleDateFormat
 import java.util.Locale
 import java.util.concurrent.ExecutorService
@@ -35,13 +41,13 @@ class MainActivity : AppCompatActivity() {
     private lateinit var cameraExecutor: ExecutorService
     private lateinit var faceDetector: FaceDetector
     private val emojiGenerator = EmojiGenerator()
+    private var currentEmojiBitmap: Bitmap? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
-        // Enable landmarks + classifications so EmojiGenerator has full data
         val options = FaceDetectorOptions.Builder()
             .setPerformanceMode(FaceDetectorOptions.PERFORMANCE_MODE_ACCURATE)
             .setLandmarkMode(FaceDetectorOptions.LANDMARK_MODE_ALL)
@@ -49,52 +55,48 @@ class MainActivity : AppCompatActivity() {
             .build()
         faceDetector = FaceDetection.getClient(options)
 
-        if (allPermissionsGranted()) {
-            startCamera()
-        } else {
-            ActivityCompat.requestPermissions(this, REQUIRED_PERMISSIONS, REQUEST_CODE_PERMISSIONS)
-        }
+        if (allPermissionsGranted()) startCamera()
+        else ActivityCompat.requestPermissions(this, REQUIRED_PERMISSIONS, REQUEST_CODE_PERMISSIONS)
 
         binding.captureButton.setOnClickListener { takePhoto() }
         binding.retakeButton.setOnClickListener  { showCameraScreen() }
+        binding.downloadButton.setOnClickListener { downloadGif() }
 
         cameraExecutor = Executors.newSingleThreadExecutor()
     }
 
     private fun startCamera() {
-        val cameraProviderFuture = ProcessCameraProvider.getInstance(this)
-        cameraProviderFuture.addListener({
-            val cameraProvider = cameraProviderFuture.get()
-            val preview = Preview.Builder().build().also {
+        ProcessCameraProvider.getInstance(this).addListener({
+            val provider = ProcessCameraProvider.getInstance(this).get()
+            val preview  = Preview.Builder().build().also {
                 it.setSurfaceProvider(binding.viewFinder.surfaceProvider)
             }
             imageCapture = ImageCapture.Builder()
-                .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
-                .build()
-
-            // Prefer front camera for selfies
-            val selector = try {
-                CameraSelector.DEFAULT_FRONT_CAMERA.also {
-                    cameraProvider.unbindAll()
-                    cameraProvider.bindToLifecycle(this, it, preview, imageCapture!!)
-                }
+                .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY).build()
+            try {
+                provider.unbindAll()
+                provider.bindToLifecycle(this, CameraSelector.DEFAULT_FRONT_CAMERA, preview, imageCapture!!)
             } catch (e: Exception) {
-                cameraProvider.unbindAll()
-                cameraProvider.bindToLifecycle(this, CameraSelector.DEFAULT_BACK_CAMERA, preview, imageCapture!!)
+                try {
+                    provider.unbindAll()
+                    provider.bindToLifecycle(this, CameraSelector.DEFAULT_BACK_CAMERA, preview, imageCapture!!)
+                } catch (ex: Exception) {
+                    Toast.makeText(this, "Could not open camera", Toast.LENGTH_SHORT).show()
+                }
             }
         }, ContextCompat.getMainExecutor(this))
     }
 
     private fun takePhoto() {
-        val imageCapture = imageCapture ?: return
+        val cap = imageCapture ?: return
         binding.captureButton.isEnabled = false
         binding.captureHint.text = "Processing…"
 
-        val photoFile = File(cacheDir,
+        val file = File(cacheDir,
             SimpleDateFormat(FILENAME_FORMAT, Locale.US).format(System.currentTimeMillis()) + ".jpg")
 
-        imageCapture.takePicture(
-            ImageCapture.OutputFileOptions.Builder(photoFile).build(),
+        cap.takePicture(
+            ImageCapture.OutputFileOptions.Builder(file).build(),
             ContextCompat.getMainExecutor(this),
             object : ImageCapture.OnImageSavedCallback {
                 override fun onError(exc: ImageCaptureException) {
@@ -102,49 +104,43 @@ class MainActivity : AppCompatActivity() {
                     binding.captureHint.text = "Point camera at your face"
                     Toast.makeText(baseContext, "Capture failed: ${exc.message}", Toast.LENGTH_SHORT).show()
                 }
-                override fun onImageSaved(output: ImageCapture.OutputFileResults) {
-                    processImage(photoFile)
-                }
+                override fun onImageSaved(output: ImageCapture.OutputFileResults) = processImage(file)
             }
         )
     }
 
     private fun processImage(file: File) {
-        // Decode the bitmap, honouring EXIF rotation so coords match ML Kit
         val raw = BitmapFactory.decodeFile(file.absolutePath) ?: run {
-            Toast.makeText(this, "Could not read image", Toast.LENGTH_SHORT).show()
             showCameraScreen(); return
         }
         val exif = ExifInterface(file.absolutePath)
-        val rotation = when (exif.getAttributeInt(ExifInterface.TAG_ORIENTATION,
-                                                   ExifInterface.ORIENTATION_NORMAL)) {
+        val rot  = when (exif.getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL)) {
             ExifInterface.ORIENTATION_ROTATE_90  -> 90f
             ExifInterface.ORIENTATION_ROTATE_180 -> 180f
             ExifInterface.ORIENTATION_ROTATE_270 -> 270f
             else                                 -> 0f
         }
-        val bitmap = if (rotation != 0f) {
-            val m = Matrix().apply { postRotate(rotation) }
-            android.graphics.Bitmap.createBitmap(raw, 0, 0, raw.width, raw.height, m, true)
+        val bitmap = if (rot != 0f) {
+            Bitmap.createBitmap(raw, 0, 0, raw.width, raw.height, Matrix().apply { postRotate(rot) }, true)
         } else raw
 
-        // Show the reference photo and switch to result screen immediately
         binding.capturedImageView.setImageBitmap(bitmap)
         showResultScreen()
-        binding.tvLabel.text = "Generating your emoji…"
+        binding.tvLabel.text        = "Generating your emoji…"
+        binding.downloadButton.isEnabled = false
+        currentEmojiBitmap          = null
         binding.generatedEmojiView.setImageDrawable(null)
 
-        // Run face detection on the correctly-oriented bitmap
-        val image = InputImage.fromBitmap(bitmap, 0)
-        faceDetector.process(image)
+        faceDetector.process(InputImage.fromBitmap(bitmap, 0))
             .addOnSuccessListener { faces ->
                 if (faces.isEmpty()) {
-                    binding.tvLabel.text = "No face detected\nTry getting closer"
-                    binding.generatedEmojiView.setImageResource(android.R.drawable.ic_menu_report_image)
+                    binding.tvLabel.text = "No face detected\nGet closer and try again"
                 } else {
-                    val emojiBitmap = emojiGenerator.generate(faces[0], bitmap)
-                    binding.generatedEmojiView.setImageBitmap(emojiBitmap)
-                    binding.tvLabel.text = expressionLabel(faces[0])
+                    val emoji = emojiGenerator.generate(faces[0], bitmap)
+                    currentEmojiBitmap = emoji
+                    binding.generatedEmojiView.setImageBitmap(emoji)
+                    binding.tvLabel.text             = expressionLabel(faces[0])
+                    binding.downloadButton.isEnabled = true
                 }
             }
             .addOnFailureListener {
@@ -152,17 +148,58 @@ class MainActivity : AppCompatActivity() {
             }
     }
 
+    private fun downloadGif() {
+        val bmp = currentEmojiBitmap ?: return
+        binding.downloadButton.isEnabled = false
+        binding.downloadButton.text      = "Saving…"
+
+        // Run encoding off the main thread
+        Thread {
+            try {
+                val name = "face_emoji_${System.currentTimeMillis()}.gif"
+
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    // Android 10+: use MediaStore so the file appears in Downloads
+                    val values = ContentValues().apply {
+                        put(MediaStore.Downloads.DISPLAY_NAME, name)
+                        put(MediaStore.Downloads.MIME_TYPE, "image/gif")
+                        put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
+                    }
+                    val uri = contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)!!
+                    contentResolver.openOutputStream(uri)!!.use { GifEncoder().encode(bmp, it) }
+                } else {
+                    // Android 9 and below: write directly to Downloads
+                    val dir  = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+                    dir.mkdirs()
+                    FileOutputStream(File(dir, name)).use { GifEncoder().encode(bmp, it) }
+                }
+
+                runOnUiThread {
+                    Toast.makeText(this, "Saved to Downloads as $name", Toast.LENGTH_LONG).show()
+                    binding.downloadButton.isEnabled = true
+                    binding.downloadButton.text      = "Download as GIF"
+                }
+            } catch (e: Exception) {
+                runOnUiThread {
+                    Toast.makeText(this, "Save failed: ${e.message}", Toast.LENGTH_SHORT).show()
+                    binding.downloadButton.isEnabled = true
+                    binding.downloadButton.text      = "Download as GIF"
+                }
+            }
+        }.start()
+    }
+
     private fun expressionLabel(face: com.google.mlkit.vision.face.Face): String {
-        val s = face.smilingProbability           ?: 0f
-        val l = face.leftEyeOpenProbability       ?: 1f
-        val r = face.rightEyeOpenProbability      ?: 1f
+        val s = face.smilingProbability        ?: 0f
+        val l = face.leftEyeOpenProbability    ?: 1f
+        val r = face.rightEyeOpenProbability   ?: 1f
         return when {
             l < 0.3f && r < 0.3f && s < 0.3f -> "Looking sleepy!"
             l < 0.3f && r < 0.3f              -> "Laughing hard!"
-            s > 0.75f -> "Huge smile!"
+            s > 0.75f -> "Big smile!"
             s > 0.50f -> "Smiling :)"
             s > 0.25f -> "Slight smile"
-            else       -> "Neutral face"
+            else       -> "Neutral"
         }
     }
 
