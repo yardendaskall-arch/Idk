@@ -5,6 +5,7 @@ import com.google.mlkit.vision.face.Face
 import com.google.mlkit.vision.face.FaceLandmark
 import kotlin.math.abs
 import kotlin.math.sqrt
+import kotlin.math.pow
 
 /**
  * Draws a custom emoji in the flat, bold style of standard Unicode emojis
@@ -21,29 +22,6 @@ class EmojiGenerator {
 
     companion object {
         private const val SIZE = 512
-
-        // Standard Fitzpatrick emoji skin tones (the 6 used in Unicode)
-        private val SKIN_TONES = intArrayOf(
-            0xFFFFD93D.toInt(), // default yellow
-            0xFFFDCBAA.toInt(), // light
-            0xFFF1C27D.toInt(), // medium-light
-            0xFFE0AC69.toInt(), // medium
-            0xFFC68642.toInt(), // medium-dark
-            0xFF8D5524.toInt()  // dark
-        )
-
-        // Simplified hair colours
-        private val HAIR_COLOURS = intArrayOf(
-            0xFF1A1A1A.toInt(), // black
-            0xFF3B2314.toInt(), // dark brown
-            0xFF7B4F2E.toInt(), // brown
-            0xFFB8860B.toInt(), // dark blonde
-            0xFFDAA520.toInt(), // blonde
-            0xFFB05E2A.toInt(), // auburn/red
-            0xFFA8A8A8.toInt(), // grey
-            0xFFFFFFFF.toInt()  // white
-        )
-
         private val OUTLINE = Color.parseColor("#1A1A1A")
         private val WHITE   = Color.WHITE
         private val IRIS    = Color.parseColor("#3D6BBF")
@@ -74,9 +52,11 @@ class EmojiGenerator {
             return PointF(cx + nx * SIZE * 0.80f, cy + ny * SIZE * 0.80f)
         }
 
-        val smiling   = face.smilingProbability       ?: 0.5f
-        val leftOpen  = face.leftEyeOpenProbability   ?: 1f
-        val rightOpen = face.rightEyeOpenProbability  ?: 1f
+        // Use ML Kit's probability when available; fall back to geometric estimation
+        // from mouth landmark positions so expression is never just a hard-coded default.
+        val smiling   = face.smilingProbability     ?: estimateSmileGeometrically(face)
+        val leftOpen  = face.leftEyeOpenProbability  ?: 1f
+        val rightOpen = face.rightEyeOpenProbability ?: 1f
 
         val leftEyePt  = lm(FaceLandmark.LEFT_EYE)   ?: PointF(cx - r * 0.34f, cy - r * 0.08f)
         val rightEyePt = lm(FaceLandmark.RIGHT_EYE)  ?: PointF(cx + r * 0.34f, cy - r * 0.08f)
@@ -87,8 +67,9 @@ class EmojiGenerator {
         val cheekL     = lm(FaceLandmark.LEFT_CHEEK)
         val cheekR     = lm(FaceLandmark.RIGHT_CHEEK)
 
-        val skinColor = nearestSkinTone(extractAvg(src, bounds, cheekL, cheekR, cx, cy, r))
-        val hairColor = nearestHairColor(extractHair(src, bounds))
+        // Raw detected colours — cartoonified (saturation boost) but NOT snapped to a preset
+        val skinColor = cartoonifySkin(extractAvg(src, bounds, cheekL, cheekR, cx, cy, r))
+        val hairColor = cartoonifyHair(extractHair(src, bounds))
         val outlineW  = SIZE * 0.030f   // thick black outline — key to emoji look
 
         // ── 1. White base disc (gives clean edge to the yellow) ──────────────
@@ -287,6 +268,31 @@ class EmojiGenerator {
         paint.style = Paint.Style.FILL; paint.strokeCap = Paint.Cap.BUTT
     }
 
+    // ── Expression geometry ───────────────────────────────────────────────────
+
+    /**
+     * Estimates smile probability (0–1) purely from the positions of the mouth
+     * landmarks. Used when ML Kit's smilingProbability is null (happens on some
+     * devices / lighting conditions).
+     *
+     * Principle: when smiling the mouth opens and MOUTH_BOTTOM drops further
+     * below the corner midpoint relative to face height.
+     */
+    private fun estimateSmileGeometrically(face: Face): Float {
+        val ml = face.getLandmark(FaceLandmark.MOUTH_LEFT)?.position  ?: return 0.3f
+        val mr = face.getLandmark(FaceLandmark.MOUTH_RIGHT)?.position ?: return 0.3f
+        val mb = face.getLandmark(FaceLandmark.MOUTH_BOTTOM)?.position ?: return 0.3f
+        val faceH = face.boundingBox.height().toFloat().coerceAtLeast(1f)
+
+        // Vertical drop from corner midpoint to mouth bottom, normalised by face height.
+        // Closed neutral ≈ 0.03–0.05 · faceH
+        // Broad smile     ≈ 0.10–0.18 · faceH
+        val cornerMidY = (ml.y + mr.y) / 2f
+        val drop = (mb.y - cornerMidY) / faceH
+
+        return ((drop - 0.03f) / 0.13f).coerceIn(0f, 1f)
+    }
+
     // ── Colour helpers ────────────────────────────────────────────────────────
 
     private fun extractAvg(
@@ -326,16 +332,34 @@ class EmojiGenerator {
         return Color.rgb((rr / 7).toInt(), (gg / 7).toInt(), (bb / 7).toInt())
     }
 
-    private fun colorDist(a: Int, b: Int): Float {
-        val dr = (Color.red(a)   - Color.red(b)).toFloat()
-        val dg = (Color.green(a) - Color.green(b)).toFloat()
-        val db = (Color.blue(a)  - Color.blue(b)).toFloat()
-        return sqrt(dr*dr + dg*dg + db*db)
+    /**
+     * Takes the raw sampled skin colour and makes it look like an emoji skin
+     * tone without snapping to a fixed palette: boost saturation by ~30 %,
+     * ensure it's bright enough to read as a face, and add a tiny warm tint.
+     */
+    private fun cartoonifySkin(raw: Int): Int {
+        val hsv = FloatArray(3)
+        Color.RGBToHSV(Color.red(raw), Color.green(raw), Color.blue(raw), hsv)
+        hsv[1] = (hsv[1] * 1.35f).coerceIn(0f, 1f)   // boost saturation
+        hsv[2] = hsv[2].coerceAtLeast(0.55f)           // minimum brightness
+        val out = Color.HSVToColor(hsv)
+        // Subtle warm tint: nudge red up, blue down
+        return Color.rgb(
+            minOf(255, Color.red(out) + 12),
+            Color.green(out),
+            maxOf(0,   Color.blue(out) - 10)
+        )
     }
 
-    private fun nearestSkinTone(detected: Int) =
-        SKIN_TONES.minByOrNull { colorDist(it, detected) } ?: SKIN_TONES[0]
-
-    private fun nearestHairColor(detected: Int) =
-        HAIR_COLOURS.minByOrNull { colorDist(it, detected) } ?: HAIR_COLOURS[0]
+    /**
+     * Takes the raw sampled hair colour and darkens/saturates it slightly
+     * so it reads clearly as hair against the skin.
+     */
+    private fun cartoonifyHair(raw: Int): Int {
+        val hsv = FloatArray(3)
+        Color.RGBToHSV(Color.red(raw), Color.green(raw), Color.blue(raw), hsv)
+        hsv[1] = (hsv[1] * 1.25f).coerceIn(0f, 1f)
+        hsv[2] = (hsv[2] * 0.80f)                      // darken slightly vs skin
+        return Color.HSVToColor(hsv)
+    }
 }
