@@ -1,0 +1,151 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/bg_dark">
+
+    <!-- ── CAMERA SCREEN ── -->
+    <FrameLayout
+        android:id="@+id/cameraContainer"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent">
+
+        <androidx.camera.view.PreviewView
+            android:id="@+id/viewFinder"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent" />
+
+        <!-- Top label -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="top|center_horizontal"
+            android:layout_marginTop="48dp"
+            android:text="@string/app_name"
+            android:textColor="#FFFFFF"
+            android:textSize="22sp"
+            android:textStyle="bold"
+            android:shadowColor="#88000000"
+            android:shadowDx="1"
+            android:shadowDy="1"
+            android:shadowRadius="4" />
+
+        <!-- Bottom capture bar -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="180dp"
+            android:layout_gravity="bottom"
+            android:background="@drawable/bottom_gradient"
+            android:gravity="center"
+            android:orientation="vertical"
+            android:paddingBottom="24dp">
+
+            <TextView
+                android:id="@+id/captureHint"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="16dp"
+                android:text="Point camera at your face"
+                android:textColor="#CCFFFFFF"
+                android:textSize="14sp" />
+
+            <!-- Circular shutter button -->
+            <FrameLayout
+                android:id="@+id/captureButton"
+                android:layout_width="76dp"
+                android:layout_height="76dp"
+                android:background="@drawable/capture_button_bg"
+                android:clickable="true"
+                android:focusable="true"
+                android:foreground="?attr/selectableItemBackgroundBorderless">
+
+                <View
+                    android:layout_width="60dp"
+                    android:layout_height="60dp"
+                    android:layout_gravity="center"
+                    android:background="@drawable/capture_button_inner" />
+            </FrameLayout>
+        </LinearLayout>
+    </FrameLayout>
+
+    <!-- ── RESULT SCREEN ── -->
+    <ScrollView
+        android:id="@+id/resultContainer"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:visibility="gone"
+        android:background="@color/bg_dark">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:gravity="center_horizontal"
+            android:padding="24dp"
+            android:paddingTop="56dp">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Your Face Emoji"
+                android:textColor="#FFFFFF"
+                android:textSize="26sp"
+                android:textStyle="bold"
+                android:layout_marginBottom="24dp" />
+
+            <!-- Captured photo -->
+            <ImageView
+                android:id="@+id/capturedImageView"
+                android:layout_width="260dp"
+                android:layout_height="260dp"
+                android:scaleType="centerCrop"
+                android:background="@drawable/image_bg"
+                android:padding="3dp" />
+
+            <!-- Big emoji -->
+            <TextView
+                android:id="@+id/tvEmoji"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="🔍"
+                android:textSize="100sp"
+                android:layout_marginTop="28dp" />
+
+            <!-- Emoji label -->
+            <TextView
+                android:id="@+id/tvLabel"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Analyzing..."
+                android:textColor="#FFFFFF"
+                android:textSize="22sp"
+                android:textStyle="bold"
+                android:gravity="center"
+                android:layout_marginTop="8dp" />
+
+            <!-- Probability hint -->
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Powered by ML Kit Face Detection"
+                android:textColor="#66FFFFFF"
+                android:textSize="12sp"
+                android:layout_marginTop="8dp" />
+
+            <!-- Retake button -->
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/retakeButton"
+                android:layout_width="match_parent"
+                android:layout_height="56dp"
+                android:layout_marginTop="36dp"
+                android:text="Try Another Face"
+                android:textColor="#FFFFFF"
+                android:textSize="16sp"
+                app:backgroundTint="@color/purple_500"
+                app:cornerRadius="28dp"
+                xmlns:app="http://schemas.android.com/apk/res-auto" />
+
+        </LinearLayout>
+    </ScrollView>
+
+</FrameLayout>
