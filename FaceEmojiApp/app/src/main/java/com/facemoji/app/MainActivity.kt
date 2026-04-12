@@ -3,6 +3,8 @@ package com.facemoji.app
 import android.Manifest
 import android.content.pm.PackageManager
 import android.graphics.BitmapFactory
+import android.graphics.Matrix
+import android.media.ExifInterface
 import android.net.Uri
 import android.os.Bundle
 import android.view.View
@@ -17,7 +19,6 @@ import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import com.facemoji.app.databinding.ActivityMainBinding
 import com.google.mlkit.vision.common.InputImage
-import com.google.mlkit.vision.face.Face
 import com.google.mlkit.vision.face.FaceDetection
 import com.google.mlkit.vision.face.FaceDetector
 import com.google.mlkit.vision.face.FaceDetectorOptions
@@ -33,15 +34,17 @@ class MainActivity : AppCompatActivity() {
     private var imageCapture: ImageCapture? = null
     private lateinit var cameraExecutor: ExecutorService
     private lateinit var faceDetector: FaceDetector
+    private val emojiGenerator = EmojiGenerator()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
-        // ML Kit face detector — classify smiling + eye-open probabilities
+        // Enable landmarks + classifications so EmojiGenerator has full data
         val options = FaceDetectorOptions.Builder()
             .setPerformanceMode(FaceDetectorOptions.PERFORMANCE_MODE_ACCURATE)
+            .setLandmarkMode(FaceDetectorOptions.LANDMARK_MODE_ALL)
             .setClassificationMode(FaceDetectorOptions.CLASSIFICATION_MODE_ALL)
             .build()
         faceDetector = FaceDetection.getClient(options)
@@ -53,7 +56,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         binding.captureButton.setOnClickListener { takePhoto() }
-        binding.retakeButton.setOnClickListener { showCameraScreen() }
+        binding.retakeButton.setOnClickListener  { showCameraScreen() }
 
         cameraExecutor = Executors.newSingleThreadExecutor()
     }
@@ -62,55 +65,36 @@ class MainActivity : AppCompatActivity() {
         val cameraProviderFuture = ProcessCameraProvider.getInstance(this)
         cameraProviderFuture.addListener({
             val cameraProvider = cameraProviderFuture.get()
-
             val preview = Preview.Builder().build().also {
                 it.setSurfaceProvider(binding.viewFinder.surfaceProvider)
             }
-
             imageCapture = ImageCapture.Builder()
                 .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
                 .build()
 
-            try {
-                cameraProvider.unbindAll()
-                cameraProvider.bindToLifecycle(
-                    this,
-                    CameraSelector.DEFAULT_FRONT_CAMERA,
-                    preview,
-                    imageCapture
-                )
-            } catch (e: Exception) {
-                // Fall back to back camera if front camera unavailable
-                try {
+            // Prefer front camera for selfies
+            val selector = try {
+                CameraSelector.DEFAULT_FRONT_CAMERA.also {
                     cameraProvider.unbindAll()
-                    cameraProvider.bindToLifecycle(
-                        this,
-                        CameraSelector.DEFAULT_BACK_CAMERA,
-                        preview,
-                        imageCapture
-                    )
-                } catch (ex: Exception) {
-                    Toast.makeText(this, "Could not open camera", Toast.LENGTH_SHORT).show()
+                    cameraProvider.bindToLifecycle(this, it, preview, imageCapture!!)
                 }
+            } catch (e: Exception) {
+                cameraProvider.unbindAll()
+                cameraProvider.bindToLifecycle(this, CameraSelector.DEFAULT_BACK_CAMERA, preview, imageCapture!!)
             }
         }, ContextCompat.getMainExecutor(this))
     }
 
     private fun takePhoto() {
         val imageCapture = imageCapture ?: return
-
         binding.captureButton.isEnabled = false
-        binding.captureHint.text = "Processing..."
+        binding.captureHint.text = "Processing…"
 
-        val photoFile = File(
-            cacheDir,
-            SimpleDateFormat(FILENAME_FORMAT, Locale.US).format(System.currentTimeMillis()) + ".jpg"
-        )
-
-        val outputOptions = ImageCapture.OutputFileOptions.Builder(photoFile).build()
+        val photoFile = File(cacheDir,
+            SimpleDateFormat(FILENAME_FORMAT, Locale.US).format(System.currentTimeMillis()) + ".jpg")
 
         imageCapture.takePicture(
-            outputOptions,
+            ImageCapture.OutputFileOptions.Builder(photoFile).build(),
             ContextCompat.getMainExecutor(this),
             object : ImageCapture.OnImageSavedCallback {
                 override fun onError(exc: ImageCaptureException) {
@@ -118,99 +102,91 @@ class MainActivity : AppCompatActivity() {
                     binding.captureHint.text = "Point camera at your face"
                     Toast.makeText(baseContext, "Capture failed: ${exc.message}", Toast.LENGTH_SHORT).show()
                 }
-
                 override fun onImageSaved(output: ImageCapture.OutputFileResults) {
-                    processAndShowResult(photoFile)
+                    processImage(photoFile)
                 }
             }
         )
     }
 
-    private fun processAndShowResult(file: File) {
-        val bitmap = BitmapFactory.decodeFile(file.absolutePath)
-        if (bitmap != null) {
-            binding.capturedImageView.setImageBitmap(bitmap)
+    private fun processImage(file: File) {
+        // Decode the bitmap, honouring EXIF rotation so coords match ML Kit
+        val raw = BitmapFactory.decodeFile(file.absolutePath) ?: run {
+            Toast.makeText(this, "Could not read image", Toast.LENGTH_SHORT).show()
+            showCameraScreen(); return
         }
+        val exif = ExifInterface(file.absolutePath)
+        val rotation = when (exif.getAttributeInt(ExifInterface.TAG_ORIENTATION,
+                                                   ExifInterface.ORIENTATION_NORMAL)) {
+            ExifInterface.ORIENTATION_ROTATE_90  -> 90f
+            ExifInterface.ORIENTATION_ROTATE_180 -> 180f
+            ExifInterface.ORIENTATION_ROTATE_270 -> 270f
+            else                                 -> 0f
+        }
+        val bitmap = if (rotation != 0f) {
+            val m = Matrix().apply { postRotate(rotation) }
+            android.graphics.Bitmap.createBitmap(raw, 0, 0, raw.width, raw.height, m, true)
+        } else raw
 
+        // Show the reference photo and switch to result screen immediately
+        binding.capturedImageView.setImageBitmap(bitmap)
         showResultScreen()
-        binding.tvEmoji.text = "🔍"
-        binding.tvLabel.text = "Analyzing..."
+        binding.tvLabel.text = "Generating your emoji…"
+        binding.generatedEmojiView.setImageDrawable(null)
 
-        val image = InputImage.fromFilePath(this, Uri.fromFile(file))
+        // Run face detection on the correctly-oriented bitmap
+        val image = InputImage.fromBitmap(bitmap, 0)
         faceDetector.process(image)
             .addOnSuccessListener { faces ->
                 if (faces.isEmpty()) {
-                    showEmoji("🤔", "No face found!\nTry again closer to the camera")
+                    binding.tvLabel.text = "No face detected\nTry getting closer"
+                    binding.generatedEmojiView.setImageResource(android.R.drawable.ic_menu_report_image)
                 } else {
-                    val result = classifyFace(faces[0])
-                    showEmoji(result.emoji, result.label)
+                    val emojiBitmap = emojiGenerator.generate(faces[0], bitmap)
+                    binding.generatedEmojiView.setImageBitmap(emojiBitmap)
+                    binding.tvLabel.text = expressionLabel(faces[0])
                 }
             }
             .addOnFailureListener {
-                showEmoji("😕", "Detection failed\nPlease try again")
+                binding.tvLabel.text = "Detection failed — please try again"
             }
     }
 
-    private fun showEmoji(emoji: String, label: String) {
-        binding.tvEmoji.text = emoji
-        binding.tvLabel.text = label
-    }
-
-    /**
-     * Maps detected facial probabilities to the closest standard emoji.
-     *
-     * Uses ML Kit's smilingProbability (0–1) and eye-open probabilities (0–1).
-     */
-    private fun classifyFace(face: Face): EmojiResult {
-        val smiling   = face.smilingProbability         ?: 0f
-        val leftEye   = face.leftEyeOpenProbability     ?: 1f
-        val rightEye  = face.rightEyeOpenProbability    ?: 1f
-
-        val eyesClosed = leftEye < 0.3f && rightEye < 0.3f
-        val winking    = (leftEye < 0.3f && rightEye > 0.7f) ||
-                         (rightEye < 0.3f && leftEye > 0.7f)
-
+    private fun expressionLabel(face: com.google.mlkit.vision.face.Face): String {
+        val s = face.smilingProbability           ?: 0f
+        val l = face.leftEyeOpenProbability       ?: 1f
+        val r = face.rightEyeOpenProbability      ?: 1f
         return when {
-            eyesClosed && smiling < 0.3f   -> EmojiResult("😴", "Sleepy")
-            eyesClosed && smiling >= 0.3f  -> EmojiResult("😂", "Laughing Hard")
-            winking    && smiling >= 0.3f  -> EmojiResult("😉", "Winking")
-            smiling >= 0.85f               -> EmojiResult("😂", "Laughing Out Loud")
-            smiling >= 0.70f               -> EmojiResult("😁", "Big Smile")
-            smiling >= 0.50f               -> EmojiResult("😊", "Happy")
-            smiling >= 0.25f               -> EmojiResult("🙂", "Slight Smile")
-            else                           -> EmojiResult("😐", "Neutral")
+            l < 0.3f && r < 0.3f && s < 0.3f -> "Looking sleepy!"
+            l < 0.3f && r < 0.3f              -> "Laughing hard!"
+            s > 0.75f -> "Huge smile!"
+            s > 0.50f -> "Smiling :)"
+            s > 0.25f -> "Slight smile"
+            else       -> "Neutral face"
         }
     }
 
-    data class EmojiResult(val emoji: String, val label: String)
-
     private fun showCameraScreen() {
-        binding.cameraContainer.visibility = View.VISIBLE
-        binding.resultContainer.visibility = View.GONE
+        binding.cameraContainer.visibility  = View.VISIBLE
+        binding.resultContainer.visibility  = View.GONE
         binding.captureButton.isEnabled = true
         binding.captureHint.text = "Point camera at your face"
     }
 
     private fun showResultScreen() {
-        binding.cameraContainer.visibility = View.GONE
-        binding.resultContainer.visibility = View.VISIBLE
+        binding.cameraContainer.visibility  = View.GONE
+        binding.resultContainer.visibility  = View.VISIBLE
     }
 
     private fun allPermissionsGranted() = REQUIRED_PERMISSIONS.all {
         ContextCompat.checkSelfPermission(baseContext, it) == PackageManager.PERMISSION_GRANTED
     }
 
-    override fun onRequestPermissionsResult(
-        requestCode: Int, permissions: Array<String>, grantResults: IntArray
-    ) {
-        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        if (requestCode == REQUEST_CODE_PERMISSIONS) {
-            if (allPermissionsGranted()) {
-                startCamera()
-            } else {
-                Toast.makeText(this, "Camera permission is required", Toast.LENGTH_LONG).show()
-                finish()
-            }
+    override fun onRequestPermissionsResult(code: Int, perms: Array<String>, results: IntArray) {
+        super.onRequestPermissionsResult(code, perms, results)
+        if (code == REQUEST_CODE_PERMISSIONS) {
+            if (allPermissionsGranted()) startCamera()
+            else { Toast.makeText(this, "Camera permission required", Toast.LENGTH_LONG).show(); finish() }
         }
     }
 
