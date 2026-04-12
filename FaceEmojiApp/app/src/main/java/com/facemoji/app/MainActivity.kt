@@ -139,6 +139,7 @@ class MainActivity : AppCompatActivity() {
                     val emoji = emojiGenerator.generate(faces[0], bitmap)
                     currentEmojiBitmap = emoji
                     binding.generatedEmojiView.setImageBitmap(emoji)
+                    EmojiStore.save(this, emoji)
                     binding.tvLabel.text             = expressionLabel(faces[0])
                     binding.downloadButton.isEnabled = true
                 }
