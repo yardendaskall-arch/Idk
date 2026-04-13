@@ -197,12 +197,12 @@ class MainActivity : AppCompatActivity() {
         val r = face.rightEyeOpenProbability ?: 1f
         val src = if (face.smilingProbability != null) "ML" else "geo"
         return when {
-            l < 0.3f && r < 0.3f && s < 0.3f -> "Sleepy \uD83D\uDE34  ($src ${(s*100).toInt()}%)"
-            l < 0.3f && r < 0.3f              -> "Laughing \uD83D\uDE02  ($src ${(s*100).toInt()}%)"
-            s > 0.75f -> "Big smile! \uD83D\uDE01  ($src ${(s*100).toInt()}%)"
-            s > 0.50f -> "Smiling \uD83D\uDE0A  ($src ${(s*100).toInt()}%)"
-            s > 0.25f -> "Slight smile \uD83D\uDE42  ($src ${(s*100).toInt()}%)"
-            else       -> "Neutral \uD83D\uDE10  ($src ${(s*100).toInt()}%)"
+            l < 0.3f && r < 0.3f -> "Sleepy \uD83D\uDE34  ($src ${(s*100).toInt()}%)"
+            s > 0.60f -> "Big smile! \uD83D\uDE01  ($src ${(s*100).toInt()}%)"
+            s > 0.38f -> "Smiling \uD83D\uDE0A  ($src ${(s*100).toInt()}%)"
+            s > 0.20f -> "Slight smile \uD83D\uDE42  ($src ${(s*100).toInt()}%)"
+            s > 0.10f -> "Neutral \uD83D\uDE10  ($src ${(s*100).toInt()}%)"
+            else      -> "Sad \uD83D\uDE22  ($src ${(s*100).toInt()}%)"
         }
     }
 
@@ -211,13 +211,13 @@ class MainActivity : AppCompatActivity() {
      * EmojiGenerator.estimateSmileGeometrically() so the label and drawing agree.
      */
     private fun estimateSmileGeometrically(face: com.google.mlkit.vision.face.Face): Float {
-        val ml = face.getLandmark(com.google.mlkit.vision.face.FaceLandmark.MOUTH_LEFT)?.position  ?: return 0.3f
-        val mr = face.getLandmark(com.google.mlkit.vision.face.FaceLandmark.MOUTH_RIGHT)?.position ?: return 0.3f
-        val mb = face.getLandmark(com.google.mlkit.vision.face.FaceLandmark.MOUTH_BOTTOM)?.position ?: return 0.3f
+        val ml = face.getLandmark(com.google.mlkit.vision.face.FaceLandmark.MOUTH_LEFT)?.position  ?: return 0.25f
+        val mr = face.getLandmark(com.google.mlkit.vision.face.FaceLandmark.MOUTH_RIGHT)?.position ?: return 0.25f
+        val mb = face.getLandmark(com.google.mlkit.vision.face.FaceLandmark.MOUTH_BOTTOM)?.position ?: return 0.25f
         val faceH = face.boundingBox.height().toFloat().coerceAtLeast(1f)
         val cornerMidY = (ml.y + mr.y) / 2f
         val drop = (mb.y - cornerMidY) / faceH
-        return ((drop - 0.03f) / 0.13f).coerceIn(0f, 1f)
+        return ((drop - 0.03f) / 0.12f).coerceIn(0f, 1f)
     }
 
     private fun showCameraScreen() {

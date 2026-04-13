@@ -2,7 +2,6 @@ package com.facemoji.app
 
 import android.content.ClipData
 import android.content.ClipboardManager
-import android.content.Context
 import android.graphics.*
 import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.StateListDrawable
@@ -22,13 +21,13 @@ import java.io.File
 class FaceEmojiKeyboard : InputMethodService() {
 
     // ── UI state ──────────────────────────────────────────────────────────────
-    private var showingEmoji  = false
+    private var showingEmoji   = false
     private var showingSymbols = false
-    private var capsOn        = false
+    private var capsOn         = false
 
-    private lateinit var root:         FrameLayout
+    private lateinit var root:          FrameLayout
     private lateinit var keyboardPanel: LinearLayout
-    private lateinit var emojiPanel:    FrameLayout
+    private lateinit var emojiPanel:    FrameLayout   // always the same view, just re-filled
 
     // Key rows in normal / caps / symbols modes
     private val ALPHA_ROWS = listOf(
@@ -57,14 +56,20 @@ class FaceEmojiKeyboard : InputMethodService() {
     )
 
     // ── dp / sp helpers ───────────────────────────────────────────────────────
-    private fun dp(v: Float) = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP,  v, resources.displayMetrics).toInt()
-    private fun sp(v: Float) = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP,   v, resources.displayMetrics)
+    private fun dp(v: Float) = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, v, resources.displayMetrics).toInt()
+    private fun sp(v: Float) = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP,  v, resources.displayMetrics)
 
     // ── IME lifecycle ─────────────────────────────────────────────────────────
     override fun onCreateInputView(): View {
         root = FrameLayout(this)
+
         buildKeyboard()
-        buildEmojiPanel()
+
+        // Create the emoji panel container ONCE and keep it in root forever.
+        // We only clear/refill its contents when the panel is opened.
+        emojiPanel = FrameLayout(this).apply { setBackgroundColor(BG_KEYBOARD) }
+        fillEmojiPanel()
+
         root.addView(keyboardPanel)
         root.addView(emojiPanel.also { it.visibility = View.GONE })
         return root
@@ -91,8 +96,7 @@ class FaceEmojiKeyboard : InputMethodService() {
                 setPadding(0, dp(2f), 0, dp(2f))
             }
             for (key in row) {
-                val btn = makeKey(key, ri == rows.size - 1)
-                rowView.addView(btn)
+                rowView.addView(makeKey(key, ri == rows.size - 1))
             }
             keyboardPanel.addView(rowView,
                 LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(52f)))
@@ -104,26 +108,27 @@ class FaceEmojiKeyboard : InputMethodService() {
         val isSpace   = key == " "
 
         val btn = TextView(this).apply {
-            text      = when (key) {
-                "\n"  -> "↵"
-                " "   -> "space"
-                "⇧"   -> if (capsOn) "⇪" else "⇧"
-                else  -> if (!showingSymbols && !isSpecial && capsOn) key.uppercase() else key
+            text = when (key) {
+                "\n" -> "↵"
+                " "  -> "space"
+                "⇧"  -> if (capsOn) "⇪" else "⇧"
+                else -> if (!showingSymbols && !isSpecial && capsOn) key.uppercase() else key
             }
-            textSize  = sp(if (isSpecial && !isBottomRow) 16f else if (isSpace) 13f else 17f) / resources.displayMetrics.scaledDensity
+            textSize = sp(if (isSpecial && !isBottomRow) 16f else if (isSpace) 13f else 17f) /
+                       resources.displayMetrics.scaledDensity
             setTextColor(if (isSpecial) 0xFFCCCCCC.toInt() else 0xFFFFFFFF.toInt())
-            gravity   = Gravity.CENTER
+            gravity  = Gravity.CENTER
             background = keyBg(isSpecial || isSpace)
-            isSoundEffectsEnabled = true
+            isSoundEffectsEnabled   = true
             isHapticFeedbackEnabled = true
         }
 
         val weight = when {
-            isSpace   -> 4f
-            key =="\n"-> 1.5f
-            key =="⌫" -> 1.5f
-            key =="⇧" -> 1.5f
-            else      -> 1f
+            isSpace      -> 4f
+            key == "\n"  -> 1.5f
+            key == "⌫"   -> 1.5f
+            key == "⇧"   -> 1.5f
+            else         -> 1f
         }
         val lp = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, weight)
         lp.setMargins(dp(3f), dp(2f), dp(3f), dp(2f))
@@ -133,9 +138,7 @@ class FaceEmojiKeyboard : InputMethodService() {
             btn.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
             handleKey(key)
         }
-        if (key == "⌫") {
-            btn.setOnLongClickListener { clearAll(); true }
-        }
+        if (key == "⌫") btn.setOnLongClickListener { clearAll(); true }
         return btn
     }
 
@@ -143,7 +146,7 @@ class FaceEmojiKeyboard : InputMethodService() {
         val ic = currentInputConnection ?: return
         when (key) {
             "⌫"    -> ic.deleteSurroundingText(1, 0)
-            "\n"   -> { sendDefaultEditorAction(true) }
+            "\n"   -> sendDefaultEditorAction(true)
             " "    -> ic.commitText(" ", 1)
             "⇧"    -> { capsOn = !capsOn; refreshKeyboard() }
             "?123" -> { showingSymbols = true;  refreshKeyboard() }
@@ -164,27 +167,26 @@ class FaceEmojiKeyboard : InputMethodService() {
         ic.endBatchEdit()
     }
 
-    // ── Emoji panel builder ───────────────────────────────────────────────────
+    // ── Emoji panel ───────────────────────────────────────────────────────────
 
-    private fun buildEmojiPanel() {
-        emojiPanel = FrameLayout(this).apply {
-            setBackgroundColor(BG_KEYBOARD)
-        }
+    /**
+     * Clears and repopulates [emojiPanel] in-place.
+     * Never reassigns [emojiPanel] — the same view stays in [root].
+     */
+    private fun fillEmojiPanel() {
+        emojiPanel.removeAllViews()
 
-        val scroll = ScrollView(this).apply {
-            isVerticalScrollBarEnabled = false
-        }
-
+        val scroll = ScrollView(this).apply { isVerticalScrollBarEnabled = false }
         val content = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(8f), dp(8f), dp(8f), dp(8f))
         }
 
         // ── Your saved face emojis ──
-        val savedFiles = EmojiStore.all(this)
+        val savedFiles = try { EmojiStore.all(this) } catch (_: Exception) { emptyList() }
         if (savedFiles.isNotEmpty()) {
             content.addView(sectionLabel("Your Face Emojis"))
-            val myRow = HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled = false }
+            val myRow  = HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled = false }
             val myList = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
                 setPadding(0, dp(4f), 0, dp(8f))
@@ -193,21 +195,25 @@ class FaceEmojiKeyboard : InputMethodService() {
                 val bmp = EmojiStore.load(file) ?: continue
                 val img = ImageView(this).apply {
                     setImageBitmap(bmp)
-                    scaleType = ImageView.ScaleType.FIT_CENTER
+                    scaleType  = ImageView.ScaleType.FIT_CENTER
                     background = keyBg(false)
                 }
-                val lp = LinearLayout.LayoutParams(dp(56f), dp(56f)).apply { setMargins(dp(4f),0,dp(4f),0) }
-                img.layoutParams = lp
-                img.setOnClickListener { sendCustomEmoji(file); hideEmojiPanel() }
+                img.layoutParams = LinearLayout.LayoutParams(dp(56f), dp(56f)).apply {
+                    setMargins(dp(4f), 0, dp(4f), 0)
+                }
+                img.setOnClickListener {
+                    trySendCustomEmoji(file)
+                    hideEmojiPanel()
+                }
                 myList.addView(img)
             }
             myRow.addView(myList)
             content.addView(myRow)
         }
 
-        // ── Generate a preview of all 6 expressions ──
+        // ── Expression emoji row ──
         content.addView(sectionLabel("Expression Emojis"))
-        val gen = EmojiGenerator()
+        val gen     = EmojiGenerator()
         val exprRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             setPadding(0, dp(4f), 0, dp(8f))
@@ -216,34 +222,35 @@ class FaceEmojiKeyboard : InputMethodService() {
             val bmp = gen.generateForExpression(expr)
             val img = ImageView(this).apply {
                 setImageBitmap(bmp)
-                scaleType = ImageView.ScaleType.FIT_CENTER
-                background = keyBg(false)
+                scaleType        = ImageView.ScaleType.FIT_CENTER
+                background       = keyBg(false)
                 contentDescription = expr.name
             }
-            val lp = LinearLayout.LayoutParams(0, dp(56f), 1f).apply { setMargins(dp(3f),0,dp(3f),0) }
-            img.layoutParams = lp
-            img.setOnClickListener { sendBitmapEmoji(bmp, expr.name); hideEmojiPanel() }
+            img.layoutParams = LinearLayout.LayoutParams(0, dp(56f), 1f).apply {
+                setMargins(dp(3f), 0, dp(3f), 0)
+            }
+            img.setOnClickListener {
+                trySendBitmapEmoji(bmp, expr.name)
+                hideEmojiPanel()
+            }
             exprRow.addView(img)
         }
         content.addView(exprRow)
 
         // ── Standard Unicode smileys ──
         content.addView(sectionLabel("Smileys & People"))
-        val grid = GridLayout(this).apply {
-            columnCount = 8
-        }
+        val grid = GridLayout(this).apply { columnCount = 8 }
         for (emoji in SMILEY_EMOJIS) {
             val tv = TextView(this).apply {
-                text     = emoji
-                textSize = 26f
-                gravity  = Gravity.CENTER
+                text       = emoji
+                textSize   = 26f
+                gravity    = Gravity.CENTER
                 background = keyBg(false)
             }
-            val lp = GridLayout.LayoutParams().apply {
+            tv.layoutParams = GridLayout.LayoutParams().apply {
                 width  = dp(44f); height = dp(44f)
                 setMargins(dp(2f), dp(2f), dp(2f), dp(2f))
             }
-            tv.layoutParams = lp
             tv.setOnClickListener {
                 currentInputConnection?.commitText(emoji, 1)
                 hideEmojiPanel()
@@ -252,7 +259,7 @@ class FaceEmojiKeyboard : InputMethodService() {
         }
         content.addView(grid)
 
-        // Close / back-to-keyboard bar at bottom
+        // ── Close bar ──
         val closeBar = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity     = Gravity.CENTER
@@ -271,13 +278,11 @@ class FaceEmojiKeyboard : InputMethodService() {
 
         scroll.addView(content)
 
-        val outerLayout = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        outerLayout.addView(scroll, LinearLayout.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT, dp(230f)))
-        outerLayout.addView(closeBar, LinearLayout.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        val outer = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        outer.addView(scroll,    LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(230f)))
+        outer.addView(closeBar,  LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
 
-        emojiPanel.addView(outerLayout)
+        emojiPanel.addView(outer)   // add to the EXISTING panel that lives in root
     }
 
     private fun sectionLabel(text: String) = TextView(this).apply {
@@ -289,37 +294,43 @@ class FaceEmojiKeyboard : InputMethodService() {
 
     // ── Emoji sending ─────────────────────────────────────────────────────────
 
-    /**
-     * Send a custom face emoji bitmap.
-     * Tries commitContent() (Android 7.1+) first so it inserts inline;
-     * falls back to clipboard copy with a toast.
-     */
-    private fun sendBitmapEmoji(bmp: Bitmap, label: String) {
-        val file = EmojiStore.save(this, bmp)
-        sendCustomEmoji(file)
+    private fun trySendBitmapEmoji(bmp: Bitmap, label: String) {
+        try {
+            val file = EmojiStore.save(this, bmp)
+            trySendCustomEmoji(file)
+        } catch (e: Exception) {
+            Toast.makeText(this, "Could not send emoji", Toast.LENGTH_SHORT).show()
+        }
     }
 
-    private fun sendCustomEmoji(file: File) {
-        val ic = currentInputConnection ?: return
-        val uri = FileProvider.getUriForFile(this, "${packageName}.fileprovider", file)
-
-        // Try commitContent for apps that accept image input (Messages, Signal, etc.)
+    private fun trySendCustomEmoji(file: File) {
         try {
-            val desc   = android.view.inputmethod.InputContentInfo(
-                uri,
-                android.content.ClipDescription("emoji", arrayOf("image/png")),
-                null
-            )
-            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.N_MR1) {
-                ic.commitContent(desc, android.view.inputmethod.InputConnection.INPUT_CONTENT_GRANT_READ_URI_PERMISSION, null)
-                return
-            }
-        } catch (_: Exception) {}
+            val ic  = currentInputConnection ?: return
+            val uri = FileProvider.getUriForFile(this, "${packageName}.fileprovider", file)
 
-        // Fallback: copy to clipboard
-        val clip = android.content.ClipData.newUri(contentResolver, "Face Emoji", uri)
-        (getSystemService(CLIPBOARD_SERVICE) as android.content.ClipboardManager).setPrimaryClip(clip)
-        Toast.makeText(this, "Emoji copied — long-press to paste!", Toast.LENGTH_SHORT).show()
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.N_MR1) {
+                val desc = android.view.inputmethod.InputContentInfo(
+                    uri,
+                    android.content.ClipDescription("emoji", arrayOf("image/png")),
+                    null
+                )
+                try {
+                    ic.commitContent(
+                        desc,
+                        android.view.inputmethod.InputConnection.INPUT_CONTENT_GRANT_READ_URI_PERMISSION,
+                        null
+                    )
+                    return
+                } catch (_: Exception) {}
+            }
+
+            // Fallback: clipboard
+            val clip = ClipData.newUri(contentResolver, "Face Emoji", uri)
+            (getSystemService(CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(clip)
+            Toast.makeText(this, "Emoji copied — long-press to paste!", Toast.LENGTH_SHORT).show()
+        } catch (e: Exception) {
+            Toast.makeText(this, "Could not send emoji", Toast.LENGTH_SHORT).show()
+        }
     }
 
     // ── Panel switching ───────────────────────────────────────────────────────
@@ -330,16 +341,14 @@ class FaceEmojiKeyboard : InputMethodService() {
 
     private fun showEmojiPanel() {
         showingEmoji = true
-        // Rebuild emoji panel to pick up any new saved emojis
-        emojiPanel.removeAllViews()
-        buildEmojiPanel()
-        emojiPanel.visibility  = View.VISIBLE
+        fillEmojiPanel()                       // refill the panel already in root
+        emojiPanel.visibility    = View.VISIBLE
         keyboardPanel.visibility = View.GONE
     }
 
     private fun hideEmojiPanel() {
         showingEmoji = false
-        emojiPanel.visibility  = View.GONE
+        emojiPanel.visibility    = View.GONE
         keyboardPanel.visibility = View.VISIBLE
     }
 
@@ -354,8 +363,8 @@ class FaceEmojiKeyboard : InputMethodService() {
         val normal  = if (special) BG_SPECIAL else BG_KEY
         val pressed = if (special) 0xFF555570.toInt() else 0xFF4A4A6A.toInt()
         return StateListDrawable().apply {
-            addState(intArrayOf( android.R.attr.state_pressed), gd(pressed))
-            addState(intArrayOf(),                               gd(normal))
+            addState(intArrayOf(android.R.attr.state_pressed), gd(pressed))
+            addState(intArrayOf(),                              gd(normal))
         }
     }
 

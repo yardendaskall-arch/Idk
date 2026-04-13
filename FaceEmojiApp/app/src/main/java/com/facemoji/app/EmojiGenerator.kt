@@ -29,16 +29,21 @@ class EmojiGenerator {
     enum class Expression { BIG_SMILE, SMILE, SLIGHT_SMILE, NEUTRAL, SAD, SLEEPY }
 
     fun resolveExpression(face: Face): Expression {
-        val s = face.smilingProbability ?: estimateSmileGeometrically(face)
+        // Use ML Kit probability when available; fall back to geometry.
+        // Combine both sources with a weighted average to smooth outliers.
+        val mlSmile  = face.smilingProbability
+        val geoSmile = estimateSmileGeometrically(face)
+        val s = if (mlSmile != null) mlSmile * 0.7f + geoSmile * 0.3f else geoSmile
+
         val l = face.leftEyeOpenProbability  ?: 1f
         val r = face.rightEyeOpenProbability ?: 1f
         return when {
             l < 0.30f && r < 0.30f -> Expression.SLEEPY
-            s >= 0.70f             -> Expression.BIG_SMILE
-            s >= 0.45f             -> Expression.SMILE
-            s >= 0.22f             -> Expression.SLIGHT_SMILE
+            s >= 0.60f             -> Expression.BIG_SMILE   // was 0.70
+            s >= 0.38f             -> Expression.SMILE       // was 0.45
+            s >= 0.20f             -> Expression.SLIGHT_SMILE
             s >= 0.10f             -> Expression.NEUTRAL
-            else                   -> Expression.SAD
+            else                   -> Expression.SAD         // only really sad faces
         }
     }
 
@@ -244,11 +249,14 @@ class EmojiGenerator {
     // ── Geometric smile estimation ────────────────────────────────────────────
 
     fun estimateSmileGeometrically(face: Face): Float {
-        val ml = face.getLandmark(FaceLandmark.MOUTH_LEFT)?.position  ?: return 0.20f
-        val mr = face.getLandmark(FaceLandmark.MOUTH_RIGHT)?.position ?: return 0.20f
-        val mb = face.getLandmark(FaceLandmark.MOUTH_BOTTOM)?.position ?: return 0.20f
+        val ml = face.getLandmark(FaceLandmark.MOUTH_LEFT)?.position  ?: return 0.25f
+        val mr = face.getLandmark(FaceLandmark.MOUTH_RIGHT)?.position ?: return 0.25f
+        val mb = face.getLandmark(FaceLandmark.MOUTH_BOTTOM)?.position ?: return 0.25f
         val faceH = face.boundingBox.height().toFloat().coerceAtLeast(1f)
-        val drop  = (mb.y - (ml.y + mr.y) / 2f) / faceH
-        return ((drop - 0.03f) / 0.13f).coerceIn(0f, 1f)
+        // When smiling, mouth corners rise (lower y), increasing the drop of mb below corners.
+        // Neutral face: drop ≈ 0.05; big smile: drop ≈ 0.14+; frown: drop ≈ 0.01.
+        val cornerMidY = (ml.y + mr.y) / 2f
+        val drop = (mb.y - cornerMidY) / faceH
+        return ((drop - 0.03f) / 0.12f).coerceIn(0f, 1f)
     }
 }
