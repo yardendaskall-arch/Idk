@@ -211,11 +211,10 @@ class MainActivity : AppCompatActivity() {
 
     /** Mirror of EmojiGenerator.estimateSmileGeometrically() so label matches drawing. */
     private fun estimateSmileGeometrically(face: com.google.mlkit.vision.face.Face): Float {
-        val FL = com.google.mlkit.vision.face.FaceLandmark
-        val ml   = face.getLandmark(FL.MOUTH_LEFT)?.position   ?: return 0.25f
-        val mr   = face.getLandmark(FL.MOUTH_RIGHT)?.position  ?: return 0.25f
-        val mb   = face.getLandmark(FL.MOUTH_BOTTOM)?.position ?: return 0.25f
-        val nose = face.getLandmark(FL.NOSE_BASE)?.position
+        val ml   = face.getLandmark(com.google.mlkit.vision.face.FaceLandmark.MOUTH_LEFT)?.position   ?: return 0.25f
+        val mr   = face.getLandmark(com.google.mlkit.vision.face.FaceLandmark.MOUTH_RIGHT)?.position  ?: return 0.25f
+        val mb   = face.getLandmark(com.google.mlkit.vision.face.FaceLandmark.MOUTH_BOTTOM)?.position ?: return 0.25f
+        val nose = face.getLandmark(com.google.mlkit.vision.face.FaceLandmark.NOSE_BASE)?.position
         val faceH      = face.boundingBox.height().toFloat().coerceAtLeast(1f)
         val faceW      = face.boundingBox.width().toFloat().coerceAtLeast(1f)
         val cornerMidY = (ml.y + mr.y) / 2f
