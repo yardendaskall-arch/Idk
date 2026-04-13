@@ -191,33 +191,38 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun expressionLabel(face: com.google.mlkit.vision.face.Face): String {
-        // If ML Kit didn't return a probability (null), fall back to geometry
-        val s = face.smilingProbability     ?: estimateSmileGeometrically(face)
         val l = face.leftEyeOpenProbability  ?: 1f
         val r = face.rightEyeOpenProbability ?: 1f
-        val src = if (face.smilingProbability != null) "ML" else "geo"
+        val mlSmile  = face.smilingProbability
+        val geoSmile = estimateSmileGeometrically(face)
+        val s = if (mlSmile != null) mlSmile * 0.60f + geoSmile * 0.40f else geoSmile
+        val src = if (mlSmile != null) "ML+geo" else "geo"
         return when {
-            l < 0.3f && r < 0.3f -> "Sleepy \uD83D\uDE34  ($src ${(s*100).toInt()}%)"
-            s > 0.60f -> "Big smile! \uD83D\uDE01  ($src ${(s*100).toInt()}%)"
-            s > 0.38f -> "Smiling \uD83D\uDE0A  ($src ${(s*100).toInt()}%)"
-            s > 0.20f -> "Slight smile \uD83D\uDE42  ($src ${(s*100).toInt()}%)"
-            s > 0.10f -> "Neutral \uD83D\uDE10  ($src ${(s*100).toInt()}%)"
+            l < 0.28f && r < 0.28f                         -> "Sleepy \uD83D\uDE34  ($src ${(s*100).toInt()}%)"
+            (l < 0.28f && r > 0.65f) ||
+            (r < 0.28f && l > 0.65f)                       -> "Winking \uD83D\uDE09  ($src ${(s*100).toInt()}%)"
+            s > 0.58f -> "Big smile! \uD83D\uDE01  ($src ${(s*100).toInt()}%)"
+            s > 0.36f -> "Smiling \uD83D\uDE0A  ($src ${(s*100).toInt()}%)"
+            s > 0.18f -> "Slight smile \uD83D\uDE42  ($src ${(s*100).toInt()}%)"
+            s > 0.09f -> "Neutral \uD83D\uDE10  ($src ${(s*100).toInt()}%)"
             else      -> "Sad \uD83D\uDE22  ($src ${(s*100).toInt()}%)"
         }
     }
 
-    /**
-     * Estimates smile from mouth landmark geometry — identical logic to
-     * EmojiGenerator.estimateSmileGeometrically() so the label and drawing agree.
-     */
+    /** Mirror of EmojiGenerator.estimateSmileGeometrically() so label matches drawing. */
     private fun estimateSmileGeometrically(face: com.google.mlkit.vision.face.Face): Float {
-        val ml = face.getLandmark(com.google.mlkit.vision.face.FaceLandmark.MOUTH_LEFT)?.position  ?: return 0.25f
-        val mr = face.getLandmark(com.google.mlkit.vision.face.FaceLandmark.MOUTH_RIGHT)?.position ?: return 0.25f
-        val mb = face.getLandmark(com.google.mlkit.vision.face.FaceLandmark.MOUTH_BOTTOM)?.position ?: return 0.25f
-        val faceH = face.boundingBox.height().toFloat().coerceAtLeast(1f)
+        val FL = com.google.mlkit.vision.face.FaceLandmark
+        val ml   = face.getLandmark(FL.MOUTH_LEFT)?.position   ?: return 0.25f
+        val mr   = face.getLandmark(FL.MOUTH_RIGHT)?.position  ?: return 0.25f
+        val mb   = face.getLandmark(FL.MOUTH_BOTTOM)?.position ?: return 0.25f
+        val nose = face.getLandmark(FL.NOSE_BASE)?.position
+        val faceH      = face.boundingBox.height().toFloat().coerceAtLeast(1f)
+        val faceW      = face.boundingBox.width().toFloat().coerceAtLeast(1f)
         val cornerMidY = (ml.y + mr.y) / 2f
-        val drop = (mb.y - cornerMidY) / faceH
-        return ((drop - 0.03f) / 0.12f).coerceIn(0f, 1f)
+        val dropScore  = ((mb.y - cornerMidY) / faceH - 0.03f) / 0.12f
+        val noseScore  = if (nose != null) (0.12f - (cornerMidY - nose.y) / faceH) / 0.08f else dropScore
+        val widthScore = (kotlin.math.abs(mr.x - ml.x) / faceW - 0.26f) / 0.14f
+        return (dropScore*0.35f + noseScore*0.45f + widthScore*0.20f).coerceIn(0f, 1f)
     }
 
     private fun showCameraScreen() {
