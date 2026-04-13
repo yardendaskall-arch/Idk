@@ -6,50 +6,36 @@ import com.google.mlkit.vision.face.FaceLandmark
 import kotlin.math.abs
 
 /**
- * Generates a standard-looking emoji.
- *
- * When called from the main app (generate(face, src)):
- *   — samples the user's actual skin colour from the photo
- *   — emoji-ifies it (boosts saturation, keeps it clean/cartoon)
- *   — applies the detected expression
- *
- * When called from the keyboard (generateForExpression(expr)):
- *   — defaults to classic emoji yellow
- *
- * Expression detection blends three geometric signals + ML Kit:
- *   A) MOUTH_BOTTOM drop below corners
- *   B) Corner height vs NOSE_BASE (stable anchor)
- *   C) Mouth width / face width
+ * Generates a standard-style emoji whose expression tracks the real face.
+ * Appearance is always classic emoji yellow with fixed eye/face positions.
+ * Only the mouth shape and eyebrow tilt change per detected expression.
  */
 class EmojiGenerator {
 
     companion object {
-        const val SIZE = 512
-        val FACE_YELLOW  = Color.parseColor("#FFDB4D")   // default for keyboard
-        val FACE_SHADOW  = Color.parseColor("#E6C135")
-        private val OUTLINE      = Color.parseColor("#1F1F1F")
-        private val EYE_WHITE    = Color.WHITE
-        private val EYE_DARK     = Color.parseColor("#1F1F1F")
-        private val LIP_DARK     = Color.parseColor("#6B1515")
-        private val TEETH_WHITE  = Color.WHITE
-        private val TEAR_BLUE    = Color.parseColor("#5BA4CF")
+        const val SIZE          = 512
+        val FACE_YELLOW         = Color.parseColor("#FFDB4D")
+        private val OUTLINE     = Color.parseColor("#1F1F1F")
+        private val EYE_WHITE   = Color.WHITE
+        private val EYE_DARK    = Color.parseColor("#1F1F1F")
+        private val LIP_DARK    = Color.parseColor("#6B1515")
+        private val TEETH_WHITE = Color.WHITE
+        private val TEAR_BLUE   = Color.parseColor("#5BA4CF")
     }
 
     enum class Expression { BIG_SMILE, SMILE, SLIGHT_SMILE, NEUTRAL, SAD, SLEEPY, WINK }
 
-    // ── Expression resolution ─────────────────────────────────────────────────
+    // ── Expression resolution ──────────────────────────────────────────────────
 
     fun resolveExpression(face: Face): Expression {
         val l = face.leftEyeOpenProbability  ?: 1f
         val r = face.rightEyeOpenProbability ?: 1f
-
         if (l < 0.28f && r < 0.28f) return Expression.SLEEPY
         if ((l < 0.28f && r > 0.65f) || (r < 0.28f && l > 0.65f)) return Expression.WINK
 
         val mlSmile  = face.smilingProbability
         val geoSmile = estimateSmileGeometrically(face)
         val s = if (mlSmile != null) mlSmile * 0.60f + geoSmile * 0.40f else geoSmile
-
         return when {
             s >= 0.58f -> Expression.BIG_SMILE
             s >= 0.36f -> Expression.SMILE
@@ -64,194 +50,96 @@ class EmojiGenerator {
         val mr   = face.getLandmark(FaceLandmark.MOUTH_RIGHT)?.position  ?: return 0.25f
         val mb   = face.getLandmark(FaceLandmark.MOUTH_BOTTOM)?.position ?: return 0.25f
         val nose = face.getLandmark(FaceLandmark.NOSE_BASE)?.position
-
         val faceH      = face.boundingBox.height().toFloat().coerceAtLeast(1f)
         val faceW      = face.boundingBox.width().toFloat().coerceAtLeast(1f)
         val cornerMidY = (ml.y + mr.y) / 2f
-
         val dropScore  = ((mb.y - cornerMidY) / faceH - 0.03f) / 0.12f
         val noseScore  = if (nose != null) (0.12f - (cornerMidY - nose.y) / faceH) / 0.08f else dropScore
         val widthScore = (abs(mr.x - ml.x) / faceW - 0.26f) / 0.14f
-
-        return (dropScore * 0.35f + noseScore * 0.45f + widthScore * 0.20f).coerceIn(0f, 1f)
+        return (dropScore*0.35f + noseScore*0.45f + widthScore*0.20f).coerceIn(0f, 1f)
     }
 
-    // ── Skin colour sampling ──────────────────────────────────────────────────
+    // ── Public entry points ────────────────────────────────────────────────────
 
-    /**
-     * Samples the user's skin colour from [bitmap] using the face bounding box
-     * and cheek landmarks, then returns an "emoji-ified" version:
-     * same hue as the real skin, saturation boosted, brightness cleaned up.
-     */
-    fun sampleSkinColor(face: Face, bitmap: Bitmap): Int {
-        val box   = face.boundingBox
-        val bmpW  = bitmap.width
-        val bmpH  = bitmap.height
+    /** Main-app: detect expression from the real face, draw standard yellow emoji. */
+    fun generate(face: Face, @Suppress("UNUSED_PARAMETER") src: Bitmap): Bitmap =
+        generateForExpression(resolveExpression(face))
 
-        // Sample regions: prefer ML Kit cheek landmarks; fall back to geometric guesses
-        val sampleCenters = mutableListOf<PointF>()
+    /** Keyboard / direct: draw standard yellow emoji for a given expression. */
+    fun generateForExpression(expr: Expression): Bitmap = drawEmoji(expr)
 
-        face.getLandmark(FaceLandmark.LEFT_CHEEK)?.position?.let  { sampleCenters += it }
-        face.getLandmark(FaceLandmark.RIGHT_CHEEK)?.position?.let { sampleCenters += it }
+    /** Keyboard overload kept for compatibility — color parameter is ignored. */
+    fun generateForExpression(expr: Expression, @Suppress("UNUSED_PARAMETER") faceColor: Int): Bitmap =
+        drawEmoji(expr)
 
-        if (sampleCenters.isEmpty()) {
-            // Geometric fallback: cheek spots + forehead
-            val cx = box.exactCenterX()
-            val cy = box.exactCenterY()
-            val hw = box.width()  / 2f
-            val hh = box.height() / 2f
-            sampleCenters += PointF(cx - hw * 0.45f, cy + hh * 0.05f)  // left cheek
-            sampleCenters += PointF(cx + hw * 0.45f, cy + hh * 0.05f)  // right cheek
-            sampleCenters += PointF(cx, cy - hh * 0.30f)                // forehead
-        }
+    // ── Core renderer ──────────────────────────────────────────────────────────
 
-        // Average pixels in a small patch around each sample centre
-        var rSum = 0L; var gSum = 0L; var bSum = 0L; var count = 0
-        val patchRadius = (box.width() * 0.06f).toInt().coerceAtLeast(4)
-
-        for (pt in sampleCenters) {
-            val px = pt.x.toInt()
-            val py = pt.y.toInt()
-            for (dx in -patchRadius..patchRadius step 2) {
-                for (dy in -patchRadius..patchRadius step 2) {
-                    val sx = (px + dx).coerceIn(0, bmpW - 1)
-                    val sy = (py + dy).coerceIn(0, bmpH - 1)
-                    val pixel = bitmap.getPixel(sx, sy)
-                    rSum += Color.red(pixel)
-                    gSum += Color.green(pixel)
-                    bSum += Color.blue(pixel)
-                    count++
-                }
-            }
-        }
-
-        if (count == 0) return FACE_YELLOW
-
-        return emojiifyColor(
-            (rSum / count).toInt(),
-            (gSum / count).toInt(),
-            (bSum / count).toInt()
-        )
-    }
-
-    /**
-     * Converts a raw sampled RGB colour into a clean, cartoon emoji tone:
-     * — keeps the hue (so brown stays brown, olive stays olive, etc.)
-     * — boosts saturation so it reads as a colour rather than grey/muted
-     * — normalises brightness so the face is always well-lit / clean
-     */
-    private fun emojiifyColor(r: Int, g: Int, b: Int): Int {
-        val hsv = FloatArray(3)
-        Color.RGBToHSV(r, g, b, hsv)
-        // Boost saturation toward a cartoon range (0.40–0.85)
-        hsv[1] = (hsv[1] + 0.18f).coerceIn(0.40f, 0.85f)
-        // Keep brightness in a clean emoji range (0.72–1.00)
-        hsv[2] = (hsv[2] * 1.10f + 0.05f).coerceIn(0.72f, 1.00f)
-        return Color.HSVToColor(255, hsv)
-    }
-
-    /** Derive a slightly darker shade of [faceColor] for the depth shadow. */
-    private fun shadowColor(faceColor: Int): Int {
-        val hsv = FloatArray(3)
-        Color.RGBToHSV(Color.red(faceColor), Color.green(faceColor), Color.blue(faceColor), hsv)
-        hsv[2] *= 0.82f
-        hsv[1] = (hsv[1] * 1.10f).coerceAtMost(1f)
-        return Color.HSVToColor(255, hsv)
-    }
-
-    // ── Public generation entry points ────────────────────────────────────────
-
-    /**
-     * Main-app entry point: samples the user's skin colour from [src],
-     * then draws a standard-shaped emoji with that colour + detected expression.
-     */
-    fun generate(face: Face, src: Bitmap): Bitmap {
-        val skinColor = sampleSkinColor(face, src)
-        return generateForExpression(resolveExpression(face), skinColor)
-    }
-
-    /** Keyboard entry point: always uses classic emoji yellow. */
-    fun generateForExpression(expr: Expression): Bitmap =
-        generateForExpression(expr, FACE_YELLOW)
-
-    /** Core drawing function — colour is supplied by the caller. */
-    fun generateForExpression(expr: Expression, faceColor: Int): Bitmap {
+    private fun drawEmoji(expr: Expression): Bitmap {
         val bmp    = Bitmap.createBitmap(SIZE, SIZE, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bmp)
         val paint  = Paint(Paint.ANTI_ALIAS_FLAG)
+        val cx     = SIZE / 2f;  val cy = SIZE / 2f
+        val r      = SIZE * 0.42f
+        val ow     = SIZE * 0.030f
 
-        val cx = SIZE / 2f
-        val cy = SIZE / 2f
-        val r  = SIZE * 0.42f
-        val ow = SIZE * 0.030f
+        // Fixed feature positions — same for every expression
+        val eyeLX   = cx - r * 0.31f;  val eyeRX = cx + r * 0.31f
+        val eyeY    = cy - r * 0.12f
+        val eyeHW   = r * 0.13f;       val eyeHH = r * 0.16f
+        val mouthY  = cy + r * 0.36f
+        val mouthHW = r * 0.34f
 
-        // Face fill
-        paint.style = Paint.Style.FILL
-        paint.color = faceColor
+        // Face fill — always classic emoji yellow circle
+        paint.style = Paint.Style.FILL; paint.color = FACE_YELLOW
         canvas.drawCircle(cx, cy, r, paint)
 
-        // Depth shadow (auto-derived from face colour)
-        val shadowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            style = Paint.Style.STROKE
-            strokeWidth = ow * 2.5f
-            color = shadowColor(faceColor)
-            alpha = 130
-        }
-        canvas.drawArc(cx-r+ow, cy-r+ow, cx+r-ow, cy+r-ow, 30f, 120f, false, shadowPaint)
-
         // Face outline
-        paint.style = Paint.Style.STROKE
-        paint.strokeWidth = ow
-        paint.color = OUTLINE
-        canvas.drawCircle(cx, cy, r - ow/2, paint)
+        paint.style = Paint.Style.STROKE; paint.strokeWidth = ow; paint.color = OUTLINE
+        canvas.drawCircle(cx, cy, r - ow / 2f, paint)
         paint.style = Paint.Style.FILL
 
-        val eyeY  = cy - r * 0.12f
-        val eyeRx = r * 0.13f
-        val eyeRy = r * 0.16f
-        val eyeLX = cx - r * 0.31f
-        val eyeRX = cx + r * 0.31f
-
+        // Eyes — shape changes only for SLEEPY and WINK
         when (expr) {
             Expression.SLEEPY -> {
-                drawClosedEye(canvas, eyeLX, eyeY, eyeRx, ow, paint)
-                drawClosedEye(canvas, eyeRX, eyeY, eyeRx, ow, paint)
+                drawClosedEye(canvas, eyeLX, eyeY, eyeHW, ow, paint)
+                drawClosedEye(canvas, eyeRX, eyeY, eyeHW, ow, paint)
             }
             Expression.WINK -> {
-                drawOpenEye(canvas, eyeLX, eyeY, eyeRx, eyeRy, ow, paint)
-                drawWinkEye(canvas, eyeRX, eyeY, eyeRx, eyeRy, ow, paint)
+                drawOpenEye(canvas, eyeLX, eyeY, eyeHW, eyeHH, ow, paint)
+                drawWinkEye(canvas, eyeRX, eyeY, eyeHW, eyeHH, ow, paint)
             }
             else -> {
-                drawOpenEye(canvas, eyeLX, eyeY, eyeRx, eyeRy, ow, paint)
-                drawOpenEye(canvas, eyeRX, eyeY, eyeRx, eyeRy, ow, paint)
+                drawOpenEye(canvas, eyeLX, eyeY, eyeHW, eyeHH, ow, paint)
+                drawOpenEye(canvas, eyeRX, eyeY, eyeHW, eyeHH, ow, paint)
             }
         }
 
-        drawEyebrows(canvas, cx, cy, r, eyeLX, eyeRX, eyeY, expr, ow, paint)
-        drawMouth(canvas, cx, cy, r, expr, ow, paint)
+        // Eyebrows — tilt changes for SAD; slightly lowered for BIG_SMILE
+        val browHW = r * 0.14f
+        val browY  = eyeY - eyeHH * 1.6f
+        drawEyebrows(canvas, eyeLX, eyeRX, browY, browHW, expr, ow, paint)
 
-        if (expr == Expression.SAD) {
-            drawTear(canvas, eyeRX, eyeY + eyeRy * 0.8f, r, paint)
-        }
-        if (expr == Expression.BIG_SMILE || expr == Expression.SMILE || expr == Expression.WINK) {
-            // Blush tinted toward the face colour for cohesion
-            val blushHsv = FloatArray(3)
-            Color.RGBToHSV(Color.red(faceColor), Color.green(faceColor), Color.blue(faceColor), blushHsv)
-            blushHsv[1] = (blushHsv[1] + 0.20f).coerceAtMost(1f)
-            blushHsv[2] = (blushHsv[2] * 0.85f)
-            paint.color = Color.argb(60, Color.red(Color.HSVToColor(blushHsv)),
-                Color.green(Color.HSVToColor(blushHsv)), Color.blue(Color.HSVToColor(blushHsv)))
-            val blushR = r * 0.15f
-            canvas.drawOval(eyeLX - r*0.34f - blushR, eyeY + r*0.30f - blushR*0.6f,
-                            eyeLX - r*0.34f + blushR, eyeY + r*0.30f + blushR*0.6f, paint)
-            canvas.drawOval(eyeRX + r*0.34f - blushR, eyeY + r*0.30f - blushR*0.6f,
-                            eyeRX + r*0.34f + blushR, eyeY + r*0.30f + blushR*0.6f, paint)
+        // Mouth — shape is the only thing that changes per expression
+        drawMouth(canvas, cx, mouthY, mouthHW, expr, ow, paint)
+
+        // Tear drop for SAD
+        if (expr == Expression.SAD)
+            drawTear(canvas, eyeRX, eyeY + eyeHH * 0.8f, r, paint)
+
+        // Blush spots for happy expressions
+        if (expr in listOf(Expression.BIG_SMILE, Expression.SMILE, Expression.WINK)) {
+            paint.color = Color.argb(55, 255, 100, 100)
+            val br      = r * 0.14f
+            val blushY  = (eyeY + mouthY) / 2f
+            val blushOff = r * 0.38f
+            canvas.drawOval(cx - blushOff - br, blushY - br*0.6f, cx - blushOff + br, blushY + br*0.6f, paint)
+            canvas.drawOval(cx + blushOff - br, blushY - br*0.6f, cx + blushOff + br, blushY + br*0.6f, paint)
         }
 
         return bmp
     }
 
-    // ── Feature drawers ───────────────────────────────────────────────────────
+    // ── Feature drawers ────────────────────────────────────────────────────────
 
     private fun drawOpenEye(
         canvas: Canvas, cx: Float, cy: Float,
@@ -262,7 +150,7 @@ class EmojiGenerator {
         paint.color = EYE_DARK
         canvas.drawCircle(cx, cy, rx * 0.60f, paint)
         paint.color = EYE_WHITE
-        canvas.drawCircle(cx + rx*0.28f, cy - ry*0.28f, rx*0.18f, paint)
+        canvas.drawCircle(cx + rx*0.28f, cy - ry*0.28f, rx * 0.18f, paint)
         paint.color = OUTLINE; paint.style = Paint.Style.STROKE; paint.strokeWidth = ow
         canvas.drawOval(cx-rx, cy-ry, cx+rx, cy+ry, paint)
         paint.style = Paint.Style.FILL
@@ -274,18 +162,16 @@ class EmojiGenerator {
     ) {
         paint.color = EYE_WHITE
         canvas.drawPath(Path().apply {
-            moveTo(cx - rx, cy); quadTo(cx, cy + ry*0.7f, cx + rx, cy); close()
+            moveTo(cx-rx, cy); quadTo(cx, cy+ry*0.7f, cx+rx, cy); close()
         }, paint)
         paint.color = OUTLINE; paint.style = Paint.Style.STROKE
         paint.strokeWidth = ow * 1.3f; paint.strokeCap = Paint.Cap.ROUND
-        canvas.drawPath(Path().apply {
-            moveTo(cx - rx, cy); quadTo(cx, cy - ry*0.55f, cx + rx, cy)
-        }, paint)
+        canvas.drawPath(Path().apply { moveTo(cx-rx, cy); quadTo(cx, cy-ry*0.55f, cx+rx, cy) }, paint)
         for (i in 0..3) {
             val t  = i / 3f
             val lx = cx - rx + t * 2 * rx
             val ly = cy - ry * 0.45f * (1f - (2f*t - 1f) * (2f*t - 1f))
-            canvas.drawLine(lx, ly, lx, ly - ry*0.18f, paint)
+            canvas.drawLine(lx, ly, lx, ly - ry * 0.18f, paint)
         }
         paint.style = Paint.Style.FILL; paint.strokeCap = Paint.Cap.BUTT
     }
@@ -300,15 +186,12 @@ class EmojiGenerator {
     }
 
     private fun drawEyebrows(
-        canvas: Canvas, cx: Float, cy: Float, r: Float,
-        lx: Float, rx: Float, eyeY: Float,
-        expr: Expression, ow: Float, paint: Paint
+        canvas: Canvas, lx: Float, rx: Float, browY: Float,
+        browHW: Float, expr: Expression, ow: Float, paint: Paint
     ) {
-        val browHW = r * 0.16f
-        val browY  = eyeY - r * 0.20f
-        val lift   = when (expr) {
-            Expression.SAD       ->  r * 0.06f
-            Expression.BIG_SMILE -> -r * 0.03f
+        val lift = when (expr) {
+            Expression.SAD       ->  browHW * 0.40f
+            Expression.BIG_SMILE -> -browHW * 0.18f
             else                 ->  0f
         }
         paint.color = OUTLINE; paint.style = Paint.Style.STROKE
@@ -320,7 +203,7 @@ class EmojiGenerator {
             moveTo(lx - browHW, lOuter); quadTo(lx, browY, lx + browHW, lInner)
         }, paint)
 
-        val rBrowY = if (expr == Expression.WINK) browY - r * 0.04f else browY
+        val rBrowY = if (expr == Expression.WINK) browY - browHW * 0.25f else browY
         val rInner = browY + (if (expr == Expression.SAD) -lift else lift)
         val rOuter = browY + (if (expr == Expression.SAD)  lift else -lift)
         canvas.drawPath(Path().apply {
@@ -331,16 +214,13 @@ class EmojiGenerator {
     }
 
     private fun drawMouth(
-        canvas: Canvas, cx: Float, cy: Float, r: Float,
+        canvas: Canvas, cx: Float, my: Float, mw: Float,
         expr: Expression, ow: Float, paint: Paint
     ) {
-        val mw = r * 0.34f
-        val my = cy + r * 0.36f
         paint.strokeCap = Paint.Cap.ROUND
-
         when (expr) {
             Expression.BIG_SMILE -> {
-                val depth = r * 0.28f
+                val depth = mw * 0.82f
                 paint.color = LIP_DARK; paint.style = Paint.Style.FILL
                 canvas.drawPath(Path().apply {
                     moveTo(cx-mw, my); quadTo(cx, my+depth*1.7f, cx+mw, my)
@@ -355,12 +235,12 @@ class EmojiGenerator {
                 canvas.drawPath(Path().apply { moveTo(cx-mw, my); quadTo(cx, my+depth, cx+mw, my) }, paint)
             }
             Expression.SMILE -> {
-                val depth = r * 0.16f
-                paint.color = OUTLINE; paint.style = Paint.Style.STROKE; paint.strokeWidth = ow*1.1f
+                val depth = mw * 0.47f
+                paint.color = OUTLINE; paint.style = Paint.Style.STROKE; paint.strokeWidth = ow * 1.1f
                 canvas.drawPath(Path().apply { moveTo(cx-mw, my); quadTo(cx, my+depth, cx+mw, my) }, paint)
             }
             Expression.SLIGHT_SMILE, Expression.WINK -> {
-                val depth = r * 0.09f
+                val depth = mw * 0.26f
                 paint.color = OUTLINE; paint.style = Paint.Style.STROKE; paint.strokeWidth = ow
                 canvas.drawPath(Path().apply {
                     moveTo(cx-mw*0.8f, my); quadTo(cx, my+depth, cx+mw*0.8f, my)
@@ -368,10 +248,10 @@ class EmojiGenerator {
             }
             Expression.NEUTRAL -> {
                 paint.color = OUTLINE; paint.style = Paint.Style.STROKE; paint.strokeWidth = ow
-                canvas.drawLine(cx-mw*0.7f, my, cx+mw*0.7f, my, paint)
+                canvas.drawLine(cx - mw*0.70f, my, cx + mw*0.70f, my, paint)
             }
             Expression.SAD, Expression.SLEEPY -> {
-                val lift = r * 0.10f
+                val lift = mw * 0.29f
                 paint.color = OUTLINE; paint.style = Paint.Style.STROKE; paint.strokeWidth = ow
                 canvas.drawPath(Path().apply {
                     moveTo(cx-mw*0.8f, my); quadTo(cx, my-lift, cx+mw*0.8f, my)
@@ -383,7 +263,7 @@ class EmojiGenerator {
 
     private fun drawTear(canvas: Canvas, eyeX: Float, eyeBottomY: Float, r: Float, paint: Paint) {
         paint.color = TEAR_BLUE
-        val tx = eyeX - r*0.08f
+        val tx = eyeX - r * 0.08f
         canvas.drawPath(Path().apply {
             moveTo(tx, eyeBottomY)
             cubicTo(tx-r*0.06f, eyeBottomY+r*0.10f, tx-r*0.06f, eyeBottomY+r*0.18f, tx, eyeBottomY+r*0.20f)
