@@ -28,6 +28,22 @@
             android:shadowColor="#AA000000"
             android:shadowDx="1" android:shadowDy="1" android:shadowRadius="4" />
 
+        <!-- Settings gear button -->
+        <TextView
+            android:id="@+id/btnSettings"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:layout_gravity="top|end"
+            android:layout_marginTop="44dp"
+            android:layout_marginEnd="12dp"
+            android:text="⚙"
+            android:textSize="26sp"
+            android:textColor="#CCFFFFFF"
+            android:gravity="center"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:clickable="true"
+            android:focusable="true" />
+
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="190dp"

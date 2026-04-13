@@ -2,6 +2,7 @@ package com.facemoji.app
 
 import android.Manifest
 import android.content.ContentValues
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
@@ -22,11 +23,13 @@ import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.lifecycleScope
 import com.facemoji.app.databinding.ActivityMainBinding
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.face.FaceDetection
 import com.google.mlkit.vision.face.FaceDetector
 import com.google.mlkit.vision.face.FaceDetectorOptions
+import kotlinx.coroutines.launch
 import java.io.File
 import java.io.FileOutputStream
 import java.text.SimpleDateFormat
@@ -61,8 +64,12 @@ class MainActivity : AppCompatActivity() {
         binding.captureButton.setOnClickListener { takePhoto() }
         binding.retakeButton.setOnClickListener  { showCameraScreen() }
         binding.downloadButton.setOnClickListener { downloadGif() }
+        binding.btnSettings.setOnClickListener {
+            startActivity(Intent(this, SettingsActivity::class.java))
+        }
 
         cameraExecutor = Executors.newSingleThreadExecutor()
+        autoCheckForUpdate()
     }
 
     private fun startCamera() {
@@ -234,6 +241,30 @@ class MainActivity : AppCompatActivity() {
     private fun showResultScreen() {
         binding.cameraContainer.visibility  = View.GONE
         binding.resultContainer.visibility  = View.VISIBLE
+    }
+
+    /**
+     * Silently checks for updates at most once per 24 hours.
+     * Shows a toast + opens SettingsActivity if a new build is available.
+     */
+    private fun autoCheckForUpdate() {
+        val prefs      = getSharedPreferences("update_prefs", MODE_PRIVATE)
+        val lastCheck  = prefs.getLong("last_check_ms", 0L)
+        val oneDayMs   = 24 * 60 * 60 * 1000L
+        if (System.currentTimeMillis() - lastCheck < oneDayMs) return
+
+        lifecycleScope.launch {
+            val result = UpdateChecker.check(BuildConfig.GITHUB_REPO, BuildConfig.BUILD_NUMBER)
+            if (result is UpdateResult.UpdateAvailable) {
+                Toast.makeText(
+                    this@MainActivity,
+                    "Update available (build ${result.info.buildNumber}) — tap ⚙ to install",
+                    Toast.LENGTH_LONG
+                ).show()
+            }
+            // Save check time whether update was found or not
+            prefs.edit().putLong("last_check_ms", System.currentTimeMillis()).apply()
+        }
     }
 
     private fun allPermissionsGranted() = REQUIRED_PERMISSIONS.all {

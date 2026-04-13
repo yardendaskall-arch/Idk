@@ -2,6 +2,8 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <uses-permission android:name="android.permission.CAMERA" />
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <uses-feature android:name="android.hardware.camera" android:required="true" />
 
     <application
@@ -22,6 +24,12 @@
             </intent-filter>
         </activity>
 
+        <activity
+            android:name=".SettingsActivity"
+            android:exported="false"
+            android:screenOrientation="portrait"
+            android:label="Settings" />
+
         <!-- Face Emoji Keyboard IME -->
         <service
             android:name=".FaceEmojiKeyboard"
@@ -36,7 +44,7 @@
                 android:resource="@xml/method" />
         </service>
 
-        <!-- FileProvider for sharing emoji PNGs from the keyboard -->
+        <!-- FileProvider for emoji PNGs (keyboard) and downloaded APKs (updater) -->
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.fileprovider"

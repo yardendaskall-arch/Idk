@@ -1,4 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <paths>
+    <!-- Face emoji PNGs (keyboard sharing) -->
     <files-path name="face_emojis" path="face_emojis/" />
+    <!-- Downloaded APK for self-update -->
+    <cache-path name="apk_downloads" path="." />
 </paths>

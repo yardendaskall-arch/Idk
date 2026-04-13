@@ -3,6 +3,9 @@ plugins {
     id 'org.jetbrains.kotlin.android'
 }
 
+// Build number injected by CI via -PBUILD_NUMBER=N; defaults to 1 locally
+def buildNum = project.hasProperty('BUILD_NUMBER') ? project.BUILD_NUMBER.toInteger() : 1
+
 android {
     namespace 'com.facemoji.app'
     compileSdk 34
@@ -11,10 +14,14 @@ android {
         applicationId "com.facemoji.app"
         minSdk 21
         targetSdk 34
-        versionCode 1
-        versionName "1.0"
+        versionCode buildNum
+        versionName "1.${buildNum}"
 
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+
+        // Exposed to BuildConfig so the update checker can compare versions
+        buildConfigField "int",    "BUILD_NUMBER",  "${buildNum}"
+        buildConfigField "String", "GITHUB_REPO",   '"yardendaskall-arch/Idk"'
     }
 
     buildTypes {
@@ -32,6 +39,7 @@ android {
     }
     buildFeatures {
         viewBinding true
+        buildConfig true
     }
 }
 
@@ -51,6 +59,6 @@ dependencies {
     // ML Kit Face Detection
     implementation 'com.google.mlkit:face-detection:16.1.5'
 
-    // Coroutines for async
+    // Coroutines for async (update check, download)
     implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3'
 }
