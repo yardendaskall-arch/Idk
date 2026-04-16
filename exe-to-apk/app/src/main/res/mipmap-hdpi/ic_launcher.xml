@@ -1,5 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
-<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
-    <background android:drawable="@drawable/ic_launcher_background" />
-    <foreground android:drawable="@drawable/ic_launcher_foreground" />
-</adaptive-icon>
+<!-- Fallback icon for API < 26 (no adaptive-icon support) -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="72dp"
+    android:height="72dp"
+    android:viewportWidth="72"
+    android:viewportHeight="72">
+    <path android:fillColor="#121212" android:pathData="M0,0h72v72H0z" />
+    <path android:fillColor="#7C3AED" android:pathData="M36,10 a26,26 0 1,0 0.001,0 Z" />
+    <path android:fillColor="#E2E8F0"
+        android:pathData="M20,34 L32,27 L32,31 L52,31 L52,37 L32,37 L32,41 Z" />
+    <path android:fillColor="#2563EB" android:pathData="M20,44 L52,44 L52,55 L20,55 Z" />
+</vector>

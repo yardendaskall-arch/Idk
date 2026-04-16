@@ -4,21 +4,16 @@
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-
-    <!-- Gear / cog silhouette representing EXE processing -->
+    <!-- Purple circle -->
     <path
         android:fillColor="#7C3AED"
-        android:pathData="M54,34 a20,20 0 1,0 0.001,0 Z" />
-    <!-- Arrow pointing right (EXE -> APK) -->
+        android:pathData="M54,24 a30,30 0 1,0 0.001,0 Z" />
+    <!-- White arrow  EXE -> APK -->
     <path
         android:fillColor="#E2E8F0"
-        android:pathData="M38,52 L54,44 L54,48 L70,48 L70,56 L54,56 L54,60 Z" />
-    <!-- "APK" label area -->
-    <rect
+        android:pathData="M34,50 L50,42 L50,47 L74,47 L74,53 L50,53 L50,58 Z" />
+    <!-- Blue rect for APK badge (drawn as path) -->
+    <path
         android:fillColor="#2563EB"
-        android:x="36"
-        android:y="64"
-        android:width="36"
-        android:height="14"
-        android:rx="3" />
+        android:pathData="M34,64 L74,64 L74,78 L34,78 Z" />
 </vector>
