@@ -58,7 +58,8 @@ public class JarSigner {
         for (Map.Entry<String, byte[]> e : entries.entrySet()) {
             appendSection(mf, e.getKey(), sha256b64(e.getValue()));
         }
-        appendSection(mf, EXE_ENTRY, sha256b64(exeDigest));
+        // exeDigest is already SHA-256 — encode directly, don't re-hash
+        appendSection(mf, EXE_ENTRY, Base64.getEncoder().encodeToString(exeDigest));
         byte[] mfBytes = mf.toString().getBytes(StandardCharsets.UTF_8);
 
         // ---- 2. CERT.SF ----
@@ -73,7 +74,7 @@ public class JarSigner {
                     sha256b64(section.getBytes(StandardCharsets.UTF_8)));
         }
         String exeSection = "Name: " + EXE_ENTRY + "\r\nSHA-256-Digest: "
-                + sha256b64(exeDigest) + "\r\n\r\n";
+                + Base64.getEncoder().encodeToString(exeDigest) + "\r\n\r\n";
         appendSection(sf, EXE_ENTRY,
                 sha256b64(exeSection.getBytes(StandardCharsets.UTF_8)));
         byte[] sfBytes = sf.toString().getBytes(StandardCharsets.UTF_8);
@@ -86,19 +87,21 @@ public class JarSigner {
         Date notBefore = new Date();
         Date notAfter  = new Date(System.currentTimeMillis() + 30L * 365 * 24 * 60 * 60 * 1000);
         X500Name dn = new X500Name("CN=ExeToApk,O=ExeToApk,C=US");
-        ContentSigner contentSigner =
-                new JcaContentSignerBuilder(SIG_ALG).build(kp.getPrivate());
+        // Two separate ContentSigner instances: ContentSigner is stateful and
+        // must not be reused after getSignature() has been called.
+        ContentSigner certSigner = new JcaContentSignerBuilder(SIG_ALG).build(kp.getPrivate());
         X509Certificate cert = new JcaX509CertificateConverter()
                 .getCertificate(new JcaX509v1CertificateBuilder(
                         dn, BigInteger.ONE, notBefore, notAfter, dn, kp.getPublic())
-                        .build(contentSigner));
+                        .build(certSigner));
 
         // ---- 4. PKCS#7 block ----
+        ContentSigner cmsSigner = new JcaContentSignerBuilder(SIG_ALG).build(kp.getPrivate());
         CMSSignedDataGenerator gen = new CMSSignedDataGenerator();
         gen.addSignerInfoGenerator(
                 new JcaSignerInfoGeneratorBuilder(
                         new JcaDigestCalculatorProviderBuilder().build())
-                        .build(contentSigner, cert));
+                        .build(cmsSigner, cert));
         gen.addCertificate(new JcaX509CertificateHolder(cert));
         byte[] certRsa = gen.generate(
                 new CMSProcessableByteArray(sfBytes), false).getEncoded();
