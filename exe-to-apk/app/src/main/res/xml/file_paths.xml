@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- App-external files dir (for generated APKs) -->
+    <external-files-path name="apk_output" path="apk-output/" />
+    <!-- Internal files dir fallback -->
+    <files-path name="apk_output_internal" path="apk-output/" />
+</paths>

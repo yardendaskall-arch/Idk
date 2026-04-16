@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Gear / cog silhouette representing EXE processing -->
+    <path
+        android:fillColor="#7C3AED"
+        android:pathData="M54,34 a20,20 0 1,0 0.001,0 Z" />
+    <!-- Arrow pointing right (EXE -> APK) -->
+    <path
+        android:fillColor="#E2E8F0"
+        android:pathData="M38,52 L54,44 L54,48 L70,48 L70,56 L54,56 L54,60 Z" />
+    <!-- "APK" label area -->
+    <rect
+        android:fillColor="#2563EB"
+        android:x="36"
+        android:y="64"
+        android:width="36"
+        android:height="14"
+        android:rx="3" />
+</vector>
