@@ -3,12 +3,10 @@ package com.exeopener;
 import android.content.Context;
 
 import java.io.BufferedOutputStream;
-import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
-import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.text.SimpleDateFormat;
 import java.util.Date;
@@ -80,7 +78,7 @@ public class ApkBuilder {
              BufferedOutputStream bos = new BufferedOutputStream(fos);
              ZipOutputStream zos = new ZipOutputStream(bos)) {
 
-            zos.setMethod(ZipOutputStream.STORED); // APK entries must be STORED (not compressed) for some
+            // Default method is DEFLATED — individual entries override as needed
 
             // 1. AndroidManifest.xml (binary XML stub)
             log("Writing AndroidManifest.xml ...");
@@ -132,14 +130,17 @@ public class ApkBuilder {
     }
 
     private void writeStreamedEntry(ZipOutputStream zos, String name, InputStream is) throws IOException {
-        // Read fully first to compute CRC (required for STORED)
-        ByteArrayOutputStream baos = new ByteArrayOutputStream();
-        byte[] buf = new byte[8192];
+        // Use DEFLATED so we can stream without loading the whole file into RAM.
+        // STORED would require CRC + size upfront, forcing a full in-memory buffer — bad for large EXEs.
+        ZipEntry entry = new ZipEntry(name);
+        entry.setMethod(ZipEntry.DEFLATED);
+        zos.putNextEntry(entry);
+        byte[] buf = new byte[65536]; // 64 KB transfer buffer
         int read;
         while ((read = is.read(buf)) != -1) {
-            baos.write(buf, 0, read);
+            zos.write(buf, 0, read);
         }
-        writeStoredEntry(zos, name, baos.toByteArray());
+        zos.closeEntry();
     }
 
     // ---- Content builders ----
