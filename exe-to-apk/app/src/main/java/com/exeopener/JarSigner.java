@@ -2,6 +2,7 @@ package com.exeopener;
 
 import org.bouncycastle.asn1.x500.X500Name;
 import org.bouncycastle.cert.jcajce.JcaX509CertificateConverter;
+import org.bouncycastle.cert.jcajce.JcaX509CertificateHolder;
 import org.bouncycastle.cert.jcajce.JcaX509v1CertificateBuilder;
 import org.bouncycastle.cms.CMSProcessableByteArray;
 import org.bouncycastle.cms.CMSSignedDataGenerator;
@@ -10,6 +11,9 @@ import org.bouncycastle.operator.ContentSigner;
 import org.bouncycastle.operator.jcajce.JcaContentSignerBuilder;
 import org.bouncycastle.operator.jcajce.JcaDigestCalculatorProviderBuilder;
 
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.IOException;
 import java.math.BigInteger;
 import java.nio.charset.StandardCharsets;
 import java.security.KeyPair;
@@ -19,125 +23,137 @@ import java.security.SecureRandom;
 import java.security.cert.X509Certificate;
 import java.util.Base64;
 import java.util.Date;
-import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.zip.CRC32;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 
 /**
- * Applies V1 (JAR) signing to an APK represented as a map of entry-name → bytes.
+ * V1 (JAR) signing for the wrapper APK.
  *
- * V1 signing adds three META-INF entries:
- *   META-INF/MANIFEST.MF  — SHA-256 digest of every non-META-INF entry
- *   META-INF/CERT.SF      — SHA-256 digest of each MANIFEST.MF section + whole manifest
- *   META-INF/CERT.RSA     — PKCS#7 SignedData block over CERT.SF
- *
- * A fresh RSA-2048 / self-signed cert is generated each time build() is called.
- * V1-only signing is valid on all Android versions when targetSdkVersion ≤ 28.
+ * Small entries (template DEX, manifest, resources) are held as byte[] in {@code entries}.
+ * The EXE is kept on disk in {@code exeFile}; only its pre-computed SHA-256
+ * {@code exeDigest} is needed in memory to build the signing manifests. The file
+ * is then streamed directly into the ZIP — no heap allocation proportional to EXE size.
  */
 public class JarSigner {
 
-    private static final String HASH_ALG = "SHA-256";
-    private static final String SIG_ALG  = "SHA256withRSA";
+    private static final String EXE_ENTRY = "assets/payload.exe";
+    private static final String SIG_ALG   = "SHA256withRSA";
 
-    private final Map<String, byte[]> entries; // ordered: non-META-INF entries
+    private final Map<String, byte[]> entries;  // all template entries (small)
+    private final File   exeFile;               // EXE on disk
+    private final byte[] exeDigest;             // pre-computed SHA-256 of EXE
 
-    public JarSigner(Map<String, byte[]> entries) {
-        this.entries = entries;
+    public JarSigner(Map<String, byte[]> entries, File exeFile, byte[] exeDigest) {
+        this.entries   = entries;
+        this.exeFile   = exeFile;
+        this.exeDigest = exeDigest;
     }
 
-    /**
-     * Writes all entries plus the three META-INF signing entries into {@code zos}.
-     */
     public void sign(ZipOutputStream zos) throws Exception {
         // ---- 1. MANIFEST.MF ----
         StringBuilder mf = new StringBuilder();
-        mf.append("Manifest-Version: 1.0\r\n");
-        mf.append("Created-By: ExeToApk\r\n");
-        mf.append("\r\n");
-
+        mf.append("Manifest-Version: 1.0\r\nCreated-By: ExeToApk\r\n\r\n");
         for (Map.Entry<String, byte[]> e : entries.entrySet()) {
-            String digest = sha256b64(e.getValue());
-            mf.append("Name: ").append(e.getKey()).append("\r\n");
-            mf.append("SHA-256-Digest: ").append(digest).append("\r\n");
-            mf.append("\r\n");
+            appendSection(mf, e.getKey(), sha256b64(e.getValue()));
         }
+        appendSection(mf, EXE_ENTRY, sha256b64(exeDigest));
         byte[] mfBytes = mf.toString().getBytes(StandardCharsets.UTF_8);
 
         // ---- 2. CERT.SF ----
         StringBuilder sf = new StringBuilder();
         sf.append("Signature-Version: 1.0\r\n");
         sf.append("Created-By: ExeToApk\r\n");
-        sf.append("SHA-256-Digest-Manifest: ").append(sha256b64(mfBytes)).append("\r\n");
-        sf.append("\r\n");
-
-        // Re-parse manifest sections to compute per-entry digests over the section text
+        sf.append("SHA-256-Digest-Manifest: ").append(sha256b64(mfBytes)).append("\r\n\r\n");
         for (Map.Entry<String, byte[]> e : entries.entrySet()) {
-            String section = "Name: " + e.getKey() + "\r\n"
-                    + "SHA-256-Digest: " + sha256b64(e.getValue()) + "\r\n"
-                    + "\r\n";
-            sf.append("Name: ").append(e.getKey()).append("\r\n");
-            sf.append("SHA-256-Digest: ")
-              .append(sha256b64(section.getBytes(StandardCharsets.UTF_8)))
-              .append("\r\n");
-            sf.append("\r\n");
+            String section = "Name: " + e.getKey() + "\r\nSHA-256-Digest: "
+                    + sha256b64(e.getValue()) + "\r\n\r\n";
+            appendSection(sf, e.getKey(),
+                    sha256b64(section.getBytes(StandardCharsets.UTF_8)));
         }
+        String exeSection = "Name: " + EXE_ENTRY + "\r\nSHA-256-Digest: "
+                + sha256b64(exeDigest) + "\r\n\r\n";
+        appendSection(sf, EXE_ENTRY,
+                sha256b64(exeSection.getBytes(StandardCharsets.UTF_8)));
         byte[] sfBytes = sf.toString().getBytes(StandardCharsets.UTF_8);
 
-        // ---- 3. Generate RSA-2048 key + self-signed cert ----
+        // ---- 3. RSA key + self-signed cert ----
         KeyPairGenerator kpg = KeyPairGenerator.getInstance("RSA");
         kpg.initialize(2048, new SecureRandom());
         KeyPair kp = kpg.generateKeyPair();
 
         Date notBefore = new Date();
         Date notAfter  = new Date(System.currentTimeMillis() + 30L * 365 * 24 * 60 * 60 * 1000);
-        X500Name dn = new X500Name("CN=ExeToApk Debug Signer,O=ExeToApk,C=US");
-
-        JcaX509v1CertificateBuilder certBuilder =
-                new JcaX509v1CertificateBuilder(dn, BigInteger.ONE, notBefore, notAfter, dn, kp.getPublic());
+        X500Name dn = new X500Name("CN=ExeToApk,O=ExeToApk,C=US");
         ContentSigner contentSigner =
                 new JcaContentSignerBuilder(SIG_ALG).build(kp.getPrivate());
-        X509Certificate cert =
-                new JcaX509CertificateConverter().getCertificate(certBuilder.build(contentSigner));
+        X509Certificate cert = new JcaX509CertificateConverter()
+                .getCertificate(new JcaX509v1CertificateBuilder(
+                        dn, BigInteger.ONE, notBefore, notAfter, dn, kp.getPublic())
+                        .build(contentSigner));
 
-        // ---- 4. PKCS#7 / CMS SignedData block ----
+        // ---- 4. PKCS#7 block ----
         CMSSignedDataGenerator gen = new CMSSignedDataGenerator();
         gen.addSignerInfoGenerator(
                 new JcaSignerInfoGeneratorBuilder(
                         new JcaDigestCalculatorProviderBuilder().build())
                         .build(contentSigner, cert));
-        gen.addCertificate(new org.bouncycastle.cert.jcajce.JcaX509CertificateHolder(cert));
-
+        gen.addCertificate(new JcaX509CertificateHolder(cert));
         byte[] certRsa = gen.generate(
                 new CMSProcessableByteArray(sfBytes), false).getEncoded();
 
-        // ---- 5. Write all entries + META-INF ----
+        // ---- 5. Write entries ----
+        // Small template entries
         for (Map.Entry<String, byte[]> e : entries.entrySet()) {
             writeStored(zos, e.getKey(), e.getValue());
         }
+        // EXE — streamed from disk, DEFLATED so no need for pre-known size/CRC
+        writeDeflated(zos, EXE_ENTRY, exeFile);
+        // Signing entries
         writeStored(zos, "META-INF/MANIFEST.MF", mfBytes);
         writeStored(zos, "META-INF/CERT.SF",     sfBytes);
         writeStored(zos, "META-INF/CERT.RSA",    certRsa);
     }
 
-    // ---- Helpers ----
+    // ---- helpers ----
 
-    private static String sha256b64(byte[] data) throws Exception {
-        byte[] hash = MessageDigest.getInstance(HASH_ALG).digest(data);
-        return Base64.getEncoder().encodeToString(hash);
+    private static void appendSection(StringBuilder sb, String name, String digest) {
+        sb.append("Name: ").append(name).append("\r\n");
+        sb.append("SHA-256-Digest: ").append(digest).append("\r\n");
+        sb.append("\r\n");
     }
 
-    private static void writeStored(ZipOutputStream zos, String name, byte[] data) throws Exception {
+    private static String sha256b64(byte[] data) throws Exception {
+        return Base64.getEncoder().encodeToString(
+                MessageDigest.getInstance("SHA-256").digest(data));
+    }
+
+    private static void writeStored(ZipOutputStream zos, String name, byte[] data)
+            throws IOException {
         CRC32 crc = new CRC32();
         crc.update(data);
-        ZipEntry entry = new ZipEntry(name);
-        entry.setMethod(ZipEntry.STORED);
-        entry.setSize(data.length);
-        entry.setCompressedSize(data.length);
-        entry.setCrc(crc.getValue());
-        zos.putNextEntry(entry);
+        ZipEntry e = new ZipEntry(name);
+        e.setMethod(ZipEntry.STORED);
+        e.setSize(data.length);
+        e.setCompressedSize(data.length);
+        e.setCrc(crc.getValue());
+        zos.putNextEntry(e);
         zos.write(data);
+        zos.closeEntry();
+    }
+
+    /** Streams a File into the ZIP with DEFLATE compression (no pre-buffering). */
+    private static void writeDeflated(ZipOutputStream zos, String name, File file)
+            throws IOException {
+        ZipEntry e = new ZipEntry(name);
+        e.setMethod(ZipEntry.DEFLATED);
+        zos.putNextEntry(e);
+        try (FileInputStream fis = new FileInputStream(file)) {
+            byte[] buf = new byte[65536];
+            int n;
+            while ((n = fis.read(buf)) != -1) zos.write(buf, 0, n);
+        }
         zos.closeEntry();
     }
 }
