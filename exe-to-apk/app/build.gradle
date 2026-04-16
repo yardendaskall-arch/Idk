@@ -2,6 +2,9 @@ plugins {
     id 'com.android.application'
 }
 
+// Directory where we drop stub_template.apk before merging assets
+def generatedAssetsDir = "${buildDir}/generated-assets"
+
 android {
     namespace 'com.exeopener'
     compileSdk 34
@@ -25,6 +28,26 @@ android {
         sourceCompatibility JavaVersion.VERSION_1_8
         targetCompatibility JavaVersion.VERSION_1_8
     }
+
+    sourceSets {
+        main {
+            assets.srcDirs += [generatedAssetsDir]
+        }
+    }
+}
+
+// Build stub-launcher first and copy its debug APK into our assets
+def copyStubApk = tasks.register('copyStubApk', Copy) {
+    dependsOn ':stub-launcher:assembleDebug'
+    from "${project(':stub-launcher').buildDir}/outputs/apk/debug/"
+    include '*.apk'
+    into generatedAssetsDir
+    rename { 'stub_template.apk' }
+}
+
+afterEvaluate {
+    tasks.named('mergeDebugAssets') { dependsOn copyStubApk }
+    tasks.named('mergeReleaseAssets') { dependsOn copyStubApk }
 }
 
 dependencies {
@@ -32,4 +55,7 @@ dependencies {
     implementation 'com.google.android.material:material:1.11.0'
     implementation 'androidx.constraintlayout:constraintlayout:2.1.4'
     implementation 'androidx.activity:activity:1.8.2'
+
+    // Bouncy Castle for V1 JAR signing (PKCS#7 signature block)
+    implementation 'org.bouncycastle:bcpkix-jdk15on:1.70'
 }
