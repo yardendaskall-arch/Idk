@@ -9,9 +9,7 @@ android {
     defaultConfig {
         applicationId "com.exewrapper.payload"
         minSdk 24
-        // targetSdk 28 keeps V1-only JAR signing valid on all Android versions,
-        // avoiding the need to implement APK v2/v3 signing block.
-        targetSdk 28
+        targetSdk 28   // V1-only JAR signing valid on all Android versions
         versionCode 1
         versionName "1.0"
     }
@@ -24,8 +22,17 @@ android {
         sourceCompatibility JavaVersion.VERSION_1_8
         targetCompatibility JavaVersion.VERSION_1_8
     }
+
+    // Allow the large Wine runtime download over HTTP (some mirrors use HTTP)
+    android.packagingOptions {
+        pickFirst '**/libc++_shared.so'
+    }
 }
 
 dependencies {
     implementation 'androidx.appcompat:appcompat:1.6.1'
+
+    // TAR + XZ extraction (for Winlator's .tar.xz wine archives)
+    implementation 'org.apache.commons:commons-compress:1.26.1'
+    implementation 'org.tukaani:xz:1.9'
 }
