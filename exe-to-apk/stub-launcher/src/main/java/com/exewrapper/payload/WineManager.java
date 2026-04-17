@@ -195,9 +195,9 @@ public class WineManager {
         env.put("WINELOADER",  wine.getAbsolutePath());
         env.put("WINEDLLPATH", rt + "/opt/wine/lib/wine");
 
-        // ARM64 native libs (for box64 and any ARM64 helper components)
-        env.put("LD_LIBRARY_PATH",
-                rt + "/lib:" + rt + "/lib/aarch64-linux-gnu");
+        // Do NOT set LD_LIBRARY_PATH: box64 is ARM64 Bionic and finds Android system
+        // libs automatically. Linux rootfs glibc paths contain linker scripts (bad ELF
+        // magic "/* G") that crash Android's linker when /bin/sh loads wine's shell wrapper.
 
         // x86_64 glibc + wine libs, mapped into the emulated x86_64 process by box64
         env.put("BOX64_LD_LIBRARY_PATH",
