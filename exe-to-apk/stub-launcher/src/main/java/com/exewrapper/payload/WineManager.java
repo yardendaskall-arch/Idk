@@ -48,8 +48,11 @@ public class WineManager {
     private static final String ROOTFS_ASSET = "assets/rootfs.tzst";
 
     // Paths inside the extracted rootfs (relative to runtimeDir):
-    private static final String BOX64_REL = "usr/local/bin/box64";
-    private static final String WINE_REL  = "opt/wine/bin/wine";
+    private static final String BOX64_REL    = "usr/local/bin/box64";
+    private static final String WINE_REL     = "opt/wine/bin/wine";
+    // Winlator ships box64 as a Bionic-linked ARM64 native library in the APK.
+    // We extract it here so it runs directly on Android without glibc/proot.
+    private static final String BOX64_BIONIC = "box64";
 
     public interface Progress {
         /** pct = 0-100, or -1 for indeterminate */
@@ -79,6 +82,9 @@ public class WineManager {
     }
 
     private static File box64Exe(Context ctx) {
+        // Prefer Bionic-linked box64 extracted from Winlator APK native libs.
+        File bionic = new File(runtimeDir(ctx), BOX64_BIONIC);
+        if (bionic.exists()) return bionic;
         return new File(runtimeDir(ctx), BOX64_REL);
     }
 
@@ -110,7 +116,8 @@ public class WineManager {
         HttpURLConnection conn = open(apkUrl);
         long apkSize = conn.getContentLengthLong();
 
-        boolean found = false;
+        boolean foundRootfs = false;
+        boolean foundBox64  = false;
         try (InputStream http = conn.getInputStream()) {
             CountingInputStream counting = new CountingInputStream(http, apkSize,
                     pct -> p.update("Downloading: " + pct + "%", pct * 7 / 10));
@@ -120,9 +127,8 @@ public class WineManager {
                 ZipEntry ze;
                 while ((ze = zip.getNextEntry()) != null) {
                     String name = ze.getName();
-                    // Support both 'assets/rootfs.tzst' and any path ending in '/rootfs.tzst'
-                    if (name.equals(ROOTFS_ASSET) || name.endsWith("/rootfs.tzst")) {
-                        found = true;
+                    if (!foundRootfs && (name.equals(ROOTFS_ASSET) || name.endsWith("/rootfs.tzst"))) {
+                        foundRootfs = true;
                         p.update("Installing Wine runtime (may take several minutes)…", 70);
                         // Shield prevents ZstdCompressorInputStream from closing the ZipInputStream.
                         InputStream shielded = new FilterInputStream(zip) {
@@ -134,17 +140,31 @@ public class WineManager {
                                      new TarArchiveInputStream(zstd)) {
                             extractTar(tar, runtimeDir(ctx));
                         }
-                        break;
+                        // Do NOT break — continue scanning for libbox64.so below.
+                    } else if (!foundBox64 && name.endsWith("/libbox64.so")) {
+                        // Winlator packages box64 as a Bionic-linked ARM64 "library"
+                        // in lib/arm64-v8a/. Extract it as a standalone executable.
+                        foundBox64 = true;
+                        p.update("Extracting box64…", 85);
+                        File box64Out = new File(runtimeDir(ctx), BOX64_BIONIC);
+                        //noinspection ResultOfMethodCallIgnored
+                        box64Out.getParentFile().mkdirs();
+                        try (FileOutputStream fos = new FileOutputStream(box64Out)) {
+                            pipe(zip, fos);
+                        }
+                        //noinspection ResultOfMethodCallIgnored
+                        box64Out.setExecutable(true);
+                    } else {
+                        zip.closeEntry();
                     }
-                    // Consume and discard this entry to advance to the next one.
-                    zip.closeEntry();
+                    if (foundRootfs && foundBox64) break;
                 }
             }
         } finally {
             conn.disconnect();
         }
 
-        if (!found) {
+        if (!foundRootfs) {
             throw new IOException(ROOTFS_ASSET
                     + " not found inside Winlator APK.\n"
                     + "The APK structure may have changed in a newer release.");
