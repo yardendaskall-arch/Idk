@@ -49,6 +49,11 @@ public class WineManager {
         void update(String message, int pct);
     }
 
+    /** Single-int callback used internally by streamDownload. */
+    private interface DownloadCb {
+        void onPct(int pct);
+    }
+
     // ── State queries ────────────────────────────────────────────────────────
 
     public static boolean isReady(Context ctx) {
@@ -98,7 +103,7 @@ public class WineManager {
         if (box64Url != null) {
             p.update("Downloading Box64…", 0);
             File tmp = new File(ctx.getCacheDir(), "box64.dl");
-            streamDownload(box64Url, tmp, pct -> p.update("Box64: " + pct + "%", pct / 4));
+            streamDownload(box64Url, tmp, (int pct) -> p.update("Box64: " + pct + "%", pct / 4));
             p.update("Extracting Box64…", 25);
             extract(tmp, rtDir);
             //noinspection ResultOfMethodCallIgnored
@@ -108,7 +113,7 @@ public class WineManager {
         // Download + extract Wine (larger)
         p.update("Downloading Wine runtime…", 25);
         File tmp = new File(ctx.getCacheDir(), "wine.dl");
-        streamDownload(wineUrl, tmp, pct -> p.update("Wine: " + pct + "%", 25 + pct * 3 / 4));
+        streamDownload(wineUrl, tmp, (int pct) -> p.update("Wine: " + pct + "%", 25 + pct * 3 / 4));
         p.update("Extracting Wine runtime…", 90);
         extract(tmp, rtDir);
         //noinspection ResultOfMethodCallIgnored
@@ -221,7 +226,7 @@ public class WineManager {
         }
     }
 
-    private static void streamDownload(String url, File dest, Progress p) throws Exception {
+    private static void streamDownload(String url, File dest, DownloadCb cb) throws Exception {
         HttpURLConnection c = open(url);
         long total = c.getContentLengthLong();
         try (InputStream in = c.getInputStream();
@@ -232,7 +237,7 @@ public class WineManager {
             while ((n = in.read(buf)) != -1) {
                 out.write(buf, 0, n);
                 done += n;
-                if (total > 0) p.update("", (int)(done * 100 / total));
+                if (total > 0) cb.onPct((int)(done * 100 / total));
             }
         } finally {
             c.disconnect();
