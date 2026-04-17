@@ -68,9 +68,9 @@ public class MainActivity extends Activity {
                     }
                 }));
                 ui.post(this::runExe);
-            } catch (Exception e) {
+            } catch (Throwable t) {
                 ui.post(() -> {
-                    setStatus("Setup failed:\n" + e.getMessage(), -1);
+                    setStatus("Setup failed:\n" + t.getMessage(), -1);
                     progressBar.setVisibility(View.GONE);
                     btnRetry.setVisibility(View.VISIBLE);
                 });

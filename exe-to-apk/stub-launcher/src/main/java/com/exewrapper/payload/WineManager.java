@@ -28,28 +28,26 @@ import java.util.zip.ZipInputStream;
 /**
  * Downloads and extracts the Winlator runtime, then launches Windows EXEs via Wine + Box64.
  *
- * Winlator's architecture (discovered from source):
- *   - box64  : ARM64 native binary compiled against Android Bionic  → no glibc needed
- *   - wine   : x86_64 Linux binary (glibc)  → runs inside box64's x86_64 emulator
- *   - libs   : x86_64 glibc + wine libs at  lib/x86_64-linux-gnu/  inside the rootfs
+ * Winlator's architecture (from source):
+ *   box64  – ARM64 native binary, compiled against Android Bionic (no glibc needed).
+ *   wine   – x86_64 Linux binary (glibc), emulated by box64's x86_64 translator.
+ *   libs   – x86_64 glibc + wine libs live at  lib/x86_64-linux-gnu/  inside the rootfs.
  *
- * Both are bundled inside the Winlator APK as  assets/rootfs.tzst  (tar + Zstandard).
- * On first run we download that APK, chain-extract rootfs.tzst in-memory, and unpack it.
+ * Everything is bundled in the Winlator APK as  assets/rootfs.tzst  (tar + Zstandard).
+ * On first run we stream the APK directly: HTTP → ZipInputStream → ZstdCompressorInputStream
+ * → TarArchiveInputStream → files on disk.  No 200–400 MB temp copy is written.
  */
 public class WineManager {
 
     private static final String TAG = "WineManager";
 
-    // Fetch the 5 most-recent releases to get the Winlator APK download URL.
     private static final String RELEASES_LIST_API =
             "https://api.github.com/repos/brunodev85/winlator/releases?per_page=5";
 
-    // Entry name of the Linux rootfs inside the Winlator APK.
+    // Entry name of the Linux rootfs inside the Winlator APK ZIP.
     private static final String ROOTFS_ASSET = "assets/rootfs.tzst";
 
-    // Paths *inside* the extracted rootfs (relative to runtimeDir):
-    //   box64 → ARM64 native, speaks Android Bionic
-    //   wine  → x86_64 Linux ELF, emulated by box64
+    // Paths inside the extracted rootfs (relative to runtimeDir):
     private static final String BOX64_REL = "usr/local/bin/box64";
     private static final String WINE_REL  = "opt/wine/bin/wine";
 
@@ -104,69 +102,80 @@ public class WineManager {
                 }
             }
         }
-        if (apkUrl == null) throw new IOException("Winlator APK not found in releases");
+        if (apkUrl == null) throw new IOException("Winlator APK not found in any release");
 
-        // Download APK (contains assets/rootfs.tzst with wine + box64 + x86_64 libs).
-        p.update("Downloading Winlator (first-time only — may take several minutes)…", 0);
-        File apkTmp = new File(ctx.getCacheDir(), "winlator.apk");
-        try {
-            streamDownload(apkUrl, apkTmp,
-                    (int pct) -> p.update("Downloading Winlator: " + pct + "%", pct * 7 / 10));
+        // Stream APK → ZIP → Zstd → TAR without writing the APK to disk.
+        // This avoids needing 200-400 MB of temporary storage for the APK itself.
+        p.update("Connecting to Winlator download…", 0);
+        HttpURLConnection conn = open(apkUrl);
+        long apkSize = conn.getContentLengthLong();
 
-            // Chain-extract:  APK (ZIP) → rootfs.tzst entry → Zstd decomp → TAR
-            p.update("Installing Wine runtime…", 70);
-            extractRootfsFromApk(apkTmp, runtimeDir(ctx), p);
+        boolean found = false;
+        try (InputStream http = conn.getInputStream()) {
+            CountingInputStream counting = new CountingInputStream(http, apkSize,
+                    pct -> p.update("Downloading: " + pct + "%", pct * 7 / 10));
+
+            try (ZipInputStream zip = new ZipInputStream(
+                    new BufferedInputStream(counting, 131072))) {
+                ZipEntry ze;
+                while ((ze = zip.getNextEntry()) != null) {
+                    String name = ze.getName();
+                    // Support both 'assets/rootfs.tzst' and any path ending in '/rootfs.tzst'
+                    if (name.equals(ROOTFS_ASSET) || name.endsWith("/rootfs.tzst")) {
+                        found = true;
+                        p.update("Installing Wine runtime (may take several minutes)…", 70);
+                        // Shield prevents ZstdCompressorInputStream from closing the ZipInputStream.
+                        InputStream shielded = new FilterInputStream(zip) {
+                            @Override public void close() { /* intentionally empty */ }
+                        };
+                        try (ZstdCompressorInputStream zstd =
+                                     new ZstdCompressorInputStream(shielded);
+                             TarArchiveInputStream tar =
+                                     new TarArchiveInputStream(zstd)) {
+                            extractTar(tar, runtimeDir(ctx));
+                        }
+                        break;
+                    }
+                    // Consume and discard this entry to advance to the next one.
+                    zip.closeEntry();
+                }
+            }
         } finally {
-            //noinspection ResultOfMethodCallIgnored
-            apkTmp.delete();
+            conn.disconnect();
         }
 
+        if (!found) {
+            throw new IOException(ROOTFS_ASSET
+                    + " not found inside Winlator APK.\n"
+                    + "The APK structure may have changed in a newer release.");
+        }
+
+        File wine = wineExe(ctx);
+        if (!wine.exists()) {
+            throw new IOException(
+                    "Wine binary not found after extraction.\n"
+                    + "Expected path: " + wine.getPath() + "\n"
+                    + "The rootfs structure may differ from what was expected.");
+        }
+
+        //noinspection ResultOfMethodCallIgnored
         new File(runtimeDir(ctx), "tmp").mkdirs();
         setExecutable(runtimeDir(ctx));
         p.update("Wine runtime ready.", 100);
     }
 
-    /**
-     * Opens the APK as a ZIP, finds assets/rootfs.tzst, then pipes it through
-     * ZstdCompressorInputStream → TarArchiveInputStream directly — no intermediate file.
-     */
-    private static void extractRootfsFromApk(File apk, File dest, Progress p) throws Exception {
-        try (ZipInputStream zip = new ZipInputStream(
-                new BufferedInputStream(new FileInputStream(apk), 131072))) {
-            ZipEntry ze;
-            while ((ze = zip.getNextEntry()) != null) {
-                if (ROOTFS_ASSET.equals(ze.getName())) {
-                    p.update("Unpacking Wine rootfs (this takes a while)…", 75);
-                    // Shield prevents ZstdCompressorInputStream from closing the ZipInputStream.
-                    InputStream shielded = new FilterInputStream(zip) {
-                        @Override public void close() { /* intentionally empty */ }
-                    };
-                    try (ZstdCompressorInputStream zstd = new ZstdCompressorInputStream(shielded);
-                         TarArchiveInputStream tar = new TarArchiveInputStream(zstd)) {
-                        extractTar(tar, dest);
-                    }
-                    p.update("Extraction complete.", 95);
-                    return;
-                }
-                zip.closeEntry();
-            }
-        }
-        throw new IOException(ROOTFS_ASSET + " not found inside Winlator APK.\n"
-                + "The APK structure may have changed.");
-    }
-
     // ── Launch ────────────────────────────────────────────────────────────────
 
     public static Process launch(Context ctx, File exeFile) throws Exception {
-        File rt     = runtimeDir(ctx);
-        File box64  = box64Exe(ctx);
-        File wine   = wineExe(ctx);
+        File rt    = runtimeDir(ctx);
+        File box64 = box64Exe(ctx);
+        File wine  = wineExe(ctx);
         File prefix = new File(ctx.getFilesDir(), "wineprefix");
         //noinspection ResultOfMethodCallIgnored
         prefix.mkdirs();
 
         List<String> cmd = new ArrayList<>();
-        // box64 is ARM64 native (Bionic) — it emulates wine which is x86_64 glibc
+        // box64 is ARM64 native (Bionic); it emulates wine which is x86_64 glibc.
         if (box64.exists()) cmd.add(box64.getAbsolutePath());
         cmd.add(wine.getAbsolutePath());
         cmd.add(exeFile.getAbsolutePath());
@@ -180,17 +189,17 @@ public class WineManager {
         env.put("TMPDIR",  rt + "/tmp");
         env.put("DISPLAY", ":0");
         env.put("PATH",
-                rt + "/" + WINE_REL.replace("/bin/wine", "/bin") + ":"
-                + rt + "/usr/local/bin:" + rt + "/usr/bin");
+                rt + "/opt/wine/bin:" + rt + "/usr/local/bin:" + rt + "/usr/bin");
 
         env.put("WINEPREFIX",  prefix.getAbsolutePath());
         env.put("WINELOADER",  wine.getAbsolutePath());
         env.put("WINEDLLPATH", rt + "/opt/wine/lib/wine");
 
-        // ARM64 native libs (for box64 itself and any native helpers)
-        env.put("LD_LIBRARY_PATH", rt + "/lib:" + rt + "/lib/aarch64-linux-gnu");
+        // ARM64 native libs (for box64 and any ARM64 helper components)
+        env.put("LD_LIBRARY_PATH",
+                rt + "/lib:" + rt + "/lib/aarch64-linux-gnu");
 
-        // x86_64 glibc + wine libs — box64 maps these into the emulated x86_64 process
+        // x86_64 glibc + wine libs, mapped into the emulated x86_64 process by box64
         env.put("BOX64_LD_LIBRARY_PATH",
                 rt + "/lib/x86_64-linux-gnu:" + rt + "/opt/wine/lib");
 
@@ -202,13 +211,14 @@ public class WineManager {
         return pb.start();
     }
 
-    // ── Extraction helpers ────────────────────────────────────────────────────
+    // ── Extraction ────────────────────────────────────────────────────────────
 
     private static void extractTar(TarArchiveInputStream tar, File dest) throws Exception {
         TarArchiveEntry entry;
         while ((entry = tar.getNextTarEntry()) != null) {
             File out = new File(dest, entry.getName());
             if (entry.isSymbolicLink()) {
+                //noinspection ResultOfMethodCallIgnored
                 out.getParentFile().mkdirs();
                 try {
                     java.nio.file.Files.deleteIfExists(out.toPath());
@@ -216,7 +226,7 @@ public class WineManager {
                             out.toPath(),
                             java.nio.file.Paths.get(entry.getLinkName()));
                 } catch (Exception ignored) {
-                    Log.w(TAG, "Symlink skipped: " + entry.getName());
+                    Log.w(TAG, "symlink skipped: " + entry.getName());
                 }
             } else if (entry.isDirectory()) {
                 //noinspection ResultOfMethodCallIgnored
@@ -231,6 +241,8 @@ public class WineManager {
         }
     }
 
+    // Generic extractor kept for any future use (box64 .tzst etc.)
+    @SuppressWarnings("unused")
     private static void extract(File archive, File dest) throws Exception {
         String n = archive.getName().toLowerCase();
         if (n.endsWith(".zip")) {
@@ -254,15 +266,15 @@ public class WineManager {
             }
         } else if (n.endsWith(".tzst") || n.endsWith(".tar.zst")) {
             try (FileInputStream fis = new FileInputStream(archive);
-                 ZstdCompressorInputStream zstd = new ZstdCompressorInputStream(
-                         new BufferedInputStream(fis));
+                 ZstdCompressorInputStream zstd =
+                         new ZstdCompressorInputStream(new BufferedInputStream(fis));
                  TarArchiveInputStream tar = new TarArchiveInputStream(zstd)) {
                 extractTar(tar, dest);
             }
         } else {
             try (FileInputStream fis = new FileInputStream(archive);
-                 XZCompressorInputStream xz = new XZCompressorInputStream(
-                         new BufferedInputStream(fis));
+                 XZCompressorInputStream xz =
+                         new XZCompressorInputStream(new BufferedInputStream(fis));
                  TarArchiveInputStream tar = new TarArchiveInputStream(xz)) {
                 extractTar(tar, dest);
             }
@@ -282,24 +294,6 @@ public class WineManager {
         }
     }
 
-    private static void streamDownload(String url, File dest, DownloadCb cb) throws Exception {
-        HttpURLConnection c = open(url);
-        long total = c.getContentLengthLong();
-        try (InputStream in = c.getInputStream();
-             FileOutputStream out = new FileOutputStream(dest)) {
-            byte[] buf = new byte[65536];
-            long done = 0;
-            int n;
-            while ((n = in.read(buf)) != -1) {
-                out.write(buf, 0, n);
-                done += n;
-                if (total > 0) cb.onPct((int) (done * 100 / total));
-            }
-        } finally {
-            c.disconnect();
-        }
-    }
-
     private static HttpURLConnection open(String url) throws Exception {
         HttpURLConnection c = (HttpURLConnection) new URL(url).openConnection();
         c.setRequestProperty("User-Agent", "ExeToApk/1.0");
@@ -310,7 +304,40 @@ public class WineManager {
         return c;
     }
 
-    // ── Misc ──────────────────────────────────────────────────────────────────
+    // ── Inner helpers ─────────────────────────────────────────────────────────
+
+    /** Counts bytes flowing through a stream and fires a progress callback. */
+    private static final class CountingInputStream extends FilterInputStream {
+        private final long      total;
+        private final DownloadCb cb;
+        private       long      count   = 0;
+        private       int       lastPct = -1;
+
+        CountingInputStream(InputStream in, long total, DownloadCb cb) {
+            super(in);
+            this.total = total;
+            this.cb    = cb;
+        }
+
+        @Override public int read(byte[] b, int off, int len) throws IOException {
+            int n = super.read(b, off, len);
+            if (n > 0) tick(n);
+            return n;
+        }
+
+        @Override public int read() throws IOException {
+            int b = super.read();
+            if (b >= 0) tick(1);
+            return b;
+        }
+
+        private void tick(int n) {
+            if (total <= 0) return;
+            count += n;
+            int pct = (int) (count * 100 / total);
+            if (pct != lastPct) { lastPct = pct; cb.onPct(pct); }
+        }
+    }
 
     private static void pipe(InputStream in, java.io.OutputStream out) throws IOException {
         byte[] buf = new byte[65536];
