@@ -66,8 +66,10 @@ public class WineManager {
     // ── State queries ─────────────────────────────────────────────────────────
 
     public static boolean isReady(Context ctx) {
-        File wine = wineExe(ctx);
-        return wine.exists() && wine.canExecute();
+        File wine  = wineExe(ctx);
+        File box64 = box64Exe(ctx);
+        return wine.exists() && wine.canExecute()
+                && box64.exists() && box64.canExecute();
     }
 
     public static File runtimeDir(Context ctx) {
