@@ -39,10 +39,11 @@ public class WineManager {
 
     private static final String TAG = "WineManager";
 
-    // Winlator GitHub API — returns the latest release JSON including asset download URLs.
-    // Winlator bundles pre-built Wine + Box64 + Box86 for Android.
-    private static final String RELEASES_API =
-            "https://api.github.com/repos/brunodev85/winlator/releases/latest";
+    // Scan up to 30 releases to find one that ships wine-aarch64 + box64 as separate
+    // archive assets.  Winlator v8+ bundles wine inside the APK instead, so we must
+    // look back to an older release (v5.x / v6.x) that still had the tar.xz assets.
+    private static final String RELEASES_LIST_API =
+            "https://api.github.com/repos/brunodev85/winlator/releases?per_page=30";
 
     public interface Progress {
         /** pct = 0-100, or -1 for indeterminate */
@@ -79,23 +80,25 @@ public class WineManager {
     // ── Setup ────────────────────────────────────────────────────────────────
 
     public static void setup(Context ctx, Progress p) throws Exception {
-        p.update("Fetching latest Winlator release…", -1);
-        String json = httpGet(RELEASES_API);
-        JSONObject release = new JSONObject(json);
-        JSONArray assets = release.getJSONArray("assets");
+        p.update("Scanning Winlator releases for wine runtime…", -1);
+        String json = httpGet(RELEASES_LIST_API);
+        JSONArray releases = new JSONArray(json);
 
         String wineUrl = null, box64Url = null;
-        for (int i = 0; i < assets.length(); i++) {
-            JSONObject a = assets.getJSONObject(i);
-            String name = a.getString("name").toLowerCase();
-            String url  = a.getString("browser_download_url");
-            if (name.contains("wine") && (name.contains("aarch64") || name.contains("arm64"))) {
-                wineUrl = url;
-            } else if (name.contains("box64") && !name.contains("box86")) {
-                box64Url = url;
+        for (int r = 0; r < releases.length(); r++) {
+            JSONArray assets = releases.getJSONObject(r).getJSONArray("assets");
+            String wc = null, bc = null;
+            for (int i = 0; i < assets.length(); i++) {
+                JSONObject a   = assets.getJSONObject(i);
+                String name    = a.getString("name").toLowerCase();
+                String url     = a.getString("browser_download_url");
+                if (isWineArm64Asset(name))  wc = url;
+                else if (isBox64Asset(name)) bc = url;
             }
+            if (wc != null) { wineUrl = wc; box64Url = bc; break; }
         }
-        if (wineUrl == null) throw new IOException("Wine archive not found in Winlator release");
+        if (wineUrl == null) throw new IOException(
+                "No wine ARM64 archive found in any of the last 30 Winlator releases");
 
         File rtDir = runtimeDir(ctx);
 
@@ -157,6 +160,22 @@ public class WineManager {
         env.put("DISPLAY",              ":0");
 
         return pb.start();
+    }
+
+    // ── Asset name matching ──────────────────────────────────────────────────
+
+    private static boolean isWineArm64Asset(String name) {
+        if (!name.contains("wine")) return false;
+        if (name.endsWith(".apk") || name.endsWith(".md5") || name.endsWith(".sha256")) return false;
+        // Accept aarch64 or arm64; exclude 32-bit flavours
+        boolean isArm64 = name.contains("aarch64") || name.contains("arm64");
+        boolean is32bit = name.contains("i686") || name.contains("x86_64");
+        return isArm64 && !is32bit;
+    }
+
+    private static boolean isBox64Asset(String name) {
+        if (!name.contains("box64") || name.contains("box86")) return false;
+        return !name.endsWith(".apk") && !name.endsWith(".md5") && !name.endsWith(".sha256");
     }
 
     // ── Extraction ───────────────────────────────────────────────────────────
