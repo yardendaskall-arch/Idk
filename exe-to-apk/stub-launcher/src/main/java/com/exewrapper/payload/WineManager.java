@@ -84,10 +84,16 @@ public class WineManager {
     }
 
     private static File box64Exe(Context ctx) {
+        File rt = runtimeDir(ctx);
         // Prefer Bionic-linked box64 extracted from Winlator APK native libs.
-        File bionic = new File(runtimeDir(ctx), BOX64_BIONIC);
+        File bionic = new File(rt, BOX64_BIONIC);
         if (bionic.exists()) return bionic;
-        return new File(runtimeDir(ctx), BOX64_REL);
+        // Search common rootfs paths (in case rootfs ships a Bionic-linked box64).
+        for (String rel : new String[]{"usr/local/bin/box64", "usr/bin/box64", "bin/box64"}) {
+            File f = new File(rt, rel);
+            if (f.exists()) return f;
+        }
+        return new File(rt, BOX64_REL);
     }
 
     // ── Setup ─────────────────────────────────────────────────────────────────
@@ -120,6 +126,7 @@ public class WineManager {
 
         boolean foundRootfs = false;
         boolean foundBox64  = false;
+        List<String> arm64Libs = new ArrayList<>();
         try (InputStream http = conn.getInputStream()) {
             CountingInputStream counting = new CountingInputStream(http, apkSize,
                     pct -> p.update("Downloading: " + pct + "%", pct * 7 / 10));
@@ -143,11 +150,12 @@ public class WineManager {
                             extractTar(tar, runtimeDir(ctx));
                         }
                         // Do NOT break — continue scanning for libbox64.so below.
-                    } else if (!foundBox64 && name.endsWith("/libbox64.so")) {
-                        // Winlator packages box64 as a Bionic-linked ARM64 "library"
-                        // in lib/arm64-v8a/. Extract it as a standalone executable.
+                    } else if (!foundBox64 && name.toLowerCase().contains("box64")
+                            && (name.contains("arm64") || name.contains("lib/"))) {
+                        // Winlator packages box64 as a Bionic-linked ARM64 "library".
+                        // Accept any arm64 entry whose name contains "box64".
                         foundBox64 = true;
-                        p.update("Extracting box64…", 85);
+                        p.update("Extracting box64 (" + name + ")…", 85);
                         File box64Out = new File(runtimeDir(ctx), BOX64_BIONIC);
                         //noinspection ResultOfMethodCallIgnored
                         box64Out.getParentFile().mkdirs();
@@ -157,6 +165,12 @@ public class WineManager {
                         //noinspection ResultOfMethodCallIgnored
                         box64Out.setExecutable(true);
                     } else {
+                        // Collect ARM64 lib names for diagnostics.
+                        if (name.contains("arm64") || name.startsWith("lib/")) {
+                            arm64Libs.add(name.contains("/")
+                                    ? name.substring(name.lastIndexOf('/') + 1)
+                                    : name);
+                        }
                         zip.closeEntry();
                     }
                     if (foundRootfs && foundBox64) break;
@@ -183,7 +197,25 @@ public class WineManager {
         //noinspection ResultOfMethodCallIgnored
         new File(runtimeDir(ctx), "tmp").mkdirs();
         setExecutable(runtimeDir(ctx));
-        p.update("Wine runtime ready.", 100);
+
+        // If box64 wasn't in the APK native libs, check whether the rootfs supplied it.
+        if (!foundBox64) {
+            File b = box64Exe(ctx);
+            if (b.exists()) {
+                foundBox64 = true;
+                Log.d(TAG, "box64 found in rootfs at: " + b.getPath());
+            }
+        }
+        if (!foundBox64) {
+            // Show diagnostic: list all ARM64-related entries seen in the APK.
+            StringBuilder sb = new StringBuilder("box64 not found in APK or rootfs.\n");
+            sb.append("ARM64/lib entries seen: ");
+            sb.append(arm64Libs.isEmpty() ? "(none)" : android.text.TextUtils.join(", ", arm64Libs));
+            p.update(sb.toString(), 95);
+            // Don't throw — caller will handle missing box64 at launch time.
+        }
+
+        p.update("Wine runtime ready." + (foundBox64 ? "" : " (box64 missing — see above)"), 100);
     }
 
     // ── Launch ────────────────────────────────────────────────────────────────
