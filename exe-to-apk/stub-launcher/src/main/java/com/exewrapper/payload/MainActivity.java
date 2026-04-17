@@ -105,25 +105,32 @@ public class MainActivity extends Activity {
             try {
                 Process proc = WineManager.launch(this, exeFile);
 
-                // Drain stdout/stderr so the process doesn't block
-                new Thread(() -> {
-                    try (BufferedReader r = new BufferedReader(
-                            new InputStreamReader(proc.getInputStream()))) {
-                        String line;
-                        while ((line = r.readLine()) != null) {
-                            // optionally show last line in UI
-                        }
-                    } catch (IOException ignored) {}
-                }).start();
-
                 ui.post(() -> {
                     tvTitle.setText("Running");
-                    setStatus("Wine is running your EXE.\nThis window can stay in the background.", -1);
+                    setStatus("Wine is running your EXE…", -1);
                     progressBar.setVisibility(View.GONE);
                 });
 
+                // Collect last 20 lines of output to show on exit
+                final java.util.ArrayDeque<String> tail = new java.util.ArrayDeque<>();
+                try (BufferedReader r = new BufferedReader(
+                        new InputStreamReader(proc.getInputStream()))) {
+                    String line;
+                    while ((line = r.readLine()) != null) {
+                        synchronized (tail) {
+                            if (tail.size() >= 20) tail.pollFirst();
+                            tail.addLast(line);
+                        }
+                    }
+                } catch (IOException ignored) {}
+
                 int code = proc.waitFor();
-                ui.post(() -> setStatus("EXE finished (exit " + code + ").", -1));
+                String out;
+                synchronized (tail) { out = android.text.TextUtils.join("\n", tail); }
+                final String summary = out.isEmpty()
+                        ? "EXE finished (exit " + code + ")."
+                        : "EXE finished (exit " + code + "):\n" + out;
+                ui.post(() -> setStatus(summary, -1));
 
             } catch (Exception e) {
                 ui.post(() -> {
