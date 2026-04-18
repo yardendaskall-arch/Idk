@@ -198,24 +198,21 @@ public class WineManager {
         new File(runtimeDir(ctx), "tmp").mkdirs();
         setExecutable(runtimeDir(ctx));
 
-        // If box64 wasn't in the APK native libs, check whether the rootfs supplied it.
         if (!foundBox64) {
             File b = box64Exe(ctx);
             if (b.exists()) {
                 foundBox64 = true;
-                Log.d(TAG, "box64 found in rootfs at: " + b.getPath());
             }
         }
         if (!foundBox64) {
-            // Show diagnostic: list all ARM64-related entries seen in the APK.
-            StringBuilder sb = new StringBuilder("box64 not found in APK or rootfs.\n");
-            sb.append("ARM64/lib entries seen: ");
-            sb.append(arm64Libs.isEmpty() ? "(none)" : android.text.TextUtils.join(", ", arm64Libs));
-            p.update(sb.toString(), 95);
-            // Don't throw — caller will handle missing box64 at launch time.
+            String libs = arm64Libs.isEmpty() ? "(none)"
+                    : android.text.TextUtils.join("\n", arm64Libs);
+            throw new IOException(
+                    "box64 not found in Winlator APK or rootfs.\n\n"
+                    + "ARM64 entries seen in APK:\n" + libs);
         }
 
-        p.update("Wine runtime ready." + (foundBox64 ? "" : " (box64 missing — see above)"), 100);
+        p.update("Wine runtime ready.", 100);
     }
 
     // ── Launch ────────────────────────────────────────────────────────────────
