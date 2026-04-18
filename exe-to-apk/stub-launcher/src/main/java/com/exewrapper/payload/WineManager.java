@@ -251,19 +251,46 @@ public class WineManager {
         File ldso = findLdso(rt);
         String arm64LibPath = ldso != null ? ldso.getParentFile().getAbsolutePath() : "";
 
+        // box64 stores argv[0] as its own path for re-exec (core.c: box64path = argv[0]).
+        // When wine64 calls execv(WINELOADER), box64 does execve(box64path, ...) — a real
+        // kernel execve. The kernel fails because box64 is glibc-linked (PT_INTERP not found).
+        // Fix: create a shell script wrapper and pass it as argv[0] via ld.so --argv0.
+        // On re-exec, box64 execs the wrapper (a plain shell script the kernel can run);
+        // the wrapper calls ld.so again, restoring the full chain transparently.
+        File wrapper = null;
+        if (ldso != null) {
+            // Build extra arm64 lib paths (merged-usr layout may put libs under usr/lib/)
+            File usrLibArm64 = new File(rt, "usr/lib/aarch64-linux-gnu");
+            String fullArm64 = arm64LibPath
+                    + (usrLibArm64.exists() ? ":" + usrLibArm64.getAbsolutePath() : "");
+            wrapper = new File(ctx.getFilesDir(), "box64-wrap.sh");
+            String script = "#!/system/bin/sh\n"
+                    + "exec " + ldso.getAbsolutePath()
+                    + " --library-path " + fullArm64
+                    + " --argv0 \"$0\""
+                    + " " + box64.getAbsolutePath()
+                    + " \"$@\"\n";
+            try (java.io.FileOutputStream ws = new java.io.FileOutputStream(wrapper)) {
+                ws.write(script.getBytes("UTF-8"));
+            }
+            //noinspection ResultOfMethodCallIgnored
+            wrapper.setExecutable(true);
+        }
+
         List<String> cmd = new ArrayList<>();
         if (box64.exists()) {
-            if (ldso != null) {
+            if (ldso != null && wrapper != null) {
                 cmd.add(ldso.getAbsolutePath());
                 cmd.add("--library-path");
                 cmd.add(arm64LibPath);
+                cmd.add("--argv0");
+                cmd.add(wrapper.getAbsolutePath());
             }
             cmd.add(box64.getAbsolutePath());
         }
         // Run wine64 (x86_64 ELF) directly so box64 emulates it and intercepts Wine's
-        // internal exec calls. Running the 'wine' shell script instead would cause native
-        // /bin/sh to exec wine64, which the kernel rejects (ENOEXEC) → "could not exec
-        // the wine loader".
+        // internal exec calls. Running the 'wine' shell script would cause native /bin/sh
+        // to exec wine64 (x86_64) which the kernel rejects (ENOEXEC).
         File wine64 = new File(rt, "opt/wine/bin/wine64");
         File wineToRun = wine64.exists() ? wine64 : wine;
         cmd.add(wineToRun.getAbsolutePath());
@@ -281,10 +308,11 @@ public class WineManager {
                 rt + "/opt/wine/bin:" + rt + "/usr/local/bin:" + rt + "/usr/bin");
 
         env.put("WINEPREFIX",  prefix.getAbsolutePath());
-        // WINELOADER must point to the actual wine64 ELF (or its preloader), not the
-        // shell script wrapper — Wine's loader exec's WINELOADER as a binary.
-        File preloader = new File(rt, "opt/wine/bin/wine64-preloader");
-        env.put("WINELOADER", (preloader.exists() ? preloader : wineToRun).getAbsolutePath());
+        // WINELOADER must be wine64 (x86_64 ELF) — not the shell script, not the preloader.
+        // The preloader does memory tricks that box64 can't accommodate; skipping it forces
+        // wine64 to exec WINELOADER (wine64 itself), which box64 handles as a standard
+        // in-process re-exec via the wrapper chain above.
+        env.put("WINELOADER", wineToRun.getAbsolutePath());
         env.put("WINEDLLPATH", rt + "/opt/wine/lib/wine");
 
         // Do NOT set LD_LIBRARY_PATH: box64 is ARM64 Bionic and finds Android system
@@ -308,7 +336,8 @@ public class WineManager {
             throw new IOException(
                     "exec failed: " + String.join(" ", cmd) + "\n"
                     + "ldso: " + (ldso != null ? ldso.getAbsolutePath() : "not found")
-                    + " | box64 exists: " + box64.exists()
+                    + " | wrapper: " + (wrapper != null ? wrapper.getAbsolutePath() : "none")
+                    + " | box64: " + box64.exists()
                     + "\n" + e.getMessage(), e);
         }
     }
