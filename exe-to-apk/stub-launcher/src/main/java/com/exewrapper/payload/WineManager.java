@@ -246,12 +246,14 @@ public class WineManager {
         // box64 is a Linux ARM64 glibc-linked binary (PT_INTERP=/lib/ld-linux-aarch64.so.1).
         // Android's kernel can't find that interpreter, so we invoke glibc's ld.so directly
         // — ld.so itself has no PT_INTERP and the kernel can exec it natively.
-        File ldso = new File(rt, "lib/aarch64-linux-gnu/ld-linux-aarch64.so.1");
-        String arm64LibPath = rt + "/lib/aarch64-linux-gnu:" + rt + "/usr/lib/aarch64-linux-gnu";
+        // The rootfs may have /lib as a symlink to usr/lib (merged-usr Debian layout), so
+        // we search recursively rather than assuming a single hardcoded path.
+        File ldso = findLdso(rt);
+        String arm64LibPath = ldso != null ? ldso.getParentFile().getAbsolutePath() : "";
 
         List<String> cmd = new ArrayList<>();
         if (box64.exists()) {
-            if (ldso.exists()) {
+            if (ldso != null) {
                 cmd.add(ldso.getAbsolutePath());
                 cmd.add("--library-path");
                 cmd.add(arm64LibPath);
@@ -294,7 +296,7 @@ public class WineManager {
         } catch (IOException e) {
             throw new IOException(
                     "exec failed: " + String.join(" ", cmd) + "\n"
-                    + "ldso exists: " + ldso.exists()
+                    + "ldso: " + (ldso != null ? ldso.getAbsolutePath() : "not found")
                     + " | box64 exists: " + box64.exists()
                     + "\n" + e.getMessage(), e);
         }
@@ -446,6 +448,33 @@ public class WineManager {
         byte[] buf = new byte[65536];
         int n;
         while ((n = in.read(buf)) != -1) out.write(buf, 0, n);
+    }
+
+    /** Recursively search wine_rt for the ARM64 glibc dynamic linker. */
+    private static File findLdso(File root) {
+        java.util.Deque<File> stack = new java.util.ArrayDeque<>();
+        stack.push(root);
+        while (!stack.isEmpty()) {
+            File dir = stack.pop();
+            File[] children = dir.listFiles();
+            if (children == null) continue;
+            for (File f : children) {
+                String name = f.getName();
+                if (name.equals("ld-linux-aarch64.so.1") && !f.isDirectory()) return f;
+                // Also accept the versioned name (ld-2.xx.so) as fallback
+                if (name.matches("ld-[0-9]+\\.[0-9]+\\.so") && !f.isDirectory()) {
+                    // prefer ld-linux-aarch64.so.1 but remember this as a candidate
+                    // check if the symlink name exists next to it
+                    File sym = new File(f.getParentFile(), "ld-linux-aarch64.so.1");
+                    if (!sym.exists()) return f; // only use versioned name if symlink missing
+                }
+                if (f.isDirectory() && !name.equals("proc") && !name.equals("sys")
+                        && !name.equals("dev")) {
+                    stack.push(f);
+                }
+            }
+        }
+        return null;
     }
 
     private static void setExecutable(File f) {
