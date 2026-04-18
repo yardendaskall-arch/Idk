@@ -289,7 +289,15 @@ public class WineManager {
         env.put("BOX64_LOG",      "0");
         env.put("BOX64_NOBANNER", "1");
 
-        return pb.start();
+        try {
+            return pb.start();
+        } catch (IOException e) {
+            throw new IOException(
+                    "exec failed: " + String.join(" ", cmd) + "\n"
+                    + "ldso exists: " + ldso.exists()
+                    + " | box64 exists: " + box64.exists()
+                    + "\n" + e.getMessage(), e);
+        }
     }
 
     // ── Extraction ────────────────────────────────────────────────────────────
