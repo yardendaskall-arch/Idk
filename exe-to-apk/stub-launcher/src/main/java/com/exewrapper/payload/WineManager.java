@@ -243,9 +243,21 @@ public class WineManager {
         //noinspection ResultOfMethodCallIgnored
         prefix.mkdirs();
 
+        // box64 is a Linux ARM64 glibc-linked binary (PT_INTERP=/lib/ld-linux-aarch64.so.1).
+        // Android's kernel can't find that interpreter, so we invoke glibc's ld.so directly
+        // — ld.so itself has no PT_INTERP and the kernel can exec it natively.
+        File ldso = new File(rt, "lib/aarch64-linux-gnu/ld-linux-aarch64.so.1");
+        String arm64LibPath = rt + "/lib/aarch64-linux-gnu:" + rt + "/usr/lib/aarch64-linux-gnu";
+
         List<String> cmd = new ArrayList<>();
-        // box64 is ARM64 native (Bionic); it emulates wine which is x86_64 glibc.
-        if (box64.exists()) cmd.add(box64.getAbsolutePath());
+        if (box64.exists()) {
+            if (ldso.exists()) {
+                cmd.add(ldso.getAbsolutePath());
+                cmd.add("--library-path");
+                cmd.add(arm64LibPath);
+            }
+            cmd.add(box64.getAbsolutePath());
+        }
         cmd.add(wine.getAbsolutePath());
         cmd.add(exeFile.getAbsolutePath());
 
