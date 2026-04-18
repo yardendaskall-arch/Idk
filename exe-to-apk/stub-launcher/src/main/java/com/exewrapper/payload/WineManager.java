@@ -260,7 +260,13 @@ public class WineManager {
             }
             cmd.add(box64.getAbsolutePath());
         }
-        cmd.add(wine.getAbsolutePath());
+        // Run wine64 (x86_64 ELF) directly so box64 emulates it and intercepts Wine's
+        // internal exec calls. Running the 'wine' shell script instead would cause native
+        // /bin/sh to exec wine64, which the kernel rejects (ENOEXEC) → "could not exec
+        // the wine loader".
+        File wine64 = new File(rt, "opt/wine/bin/wine64");
+        File wineToRun = wine64.exists() ? wine64 : wine;
+        cmd.add(wineToRun.getAbsolutePath());
         cmd.add(exeFile.getAbsolutePath());
 
         ProcessBuilder pb = new ProcessBuilder(cmd);
@@ -275,16 +281,21 @@ public class WineManager {
                 rt + "/opt/wine/bin:" + rt + "/usr/local/bin:" + rt + "/usr/bin");
 
         env.put("WINEPREFIX",  prefix.getAbsolutePath());
-        env.put("WINELOADER",  wine.getAbsolutePath());
+        // WINELOADER must point to the actual wine64 ELF (or its preloader), not the
+        // shell script wrapper — Wine's loader exec's WINELOADER as a binary.
+        File preloader = new File(rt, "opt/wine/bin/wine64-preloader");
+        env.put("WINELOADER", (preloader.exists() ? preloader : wineToRun).getAbsolutePath());
         env.put("WINEDLLPATH", rt + "/opt/wine/lib/wine");
 
         // Do NOT set LD_LIBRARY_PATH: box64 is ARM64 Bionic and finds Android system
         // libs automatically. Linux rootfs glibc paths contain linker scripts (bad ELF
         // magic "/* G") that crash Android's linker when /bin/sh loads wine's shell wrapper.
 
-        // x86_64 glibc + wine libs, mapped into the emulated x86_64 process by box64
+        // x86_64 glibc + wine libs for box64 to satisfy Wine's dynamic deps.
+        // Include both merged-usr (usr/lib/x86_64-linux-gnu) and legacy (/lib/x86_64-linux-gnu).
         env.put("BOX64_LD_LIBRARY_PATH",
-                rt + "/lib/x86_64-linux-gnu:" + rt + "/opt/wine/lib");
+                rt + "/lib/x86_64-linux-gnu:" + rt + "/usr/lib/x86_64-linux-gnu:"
+                + rt + "/opt/wine/lib:" + rt + "/opt/wine/lib/wine");
 
         env.put("BOX64_PATH",     rt + "/usr/local/bin");
         env.put("BOX64_DYNAREC",  "1");
