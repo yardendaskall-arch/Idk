@@ -275,10 +275,24 @@ public class WineManager {
                 //noinspection ResultOfMethodCallIgnored
                 out.getParentFile().mkdirs();
                 try {
+                    String linkTarget = entry.getLinkName();
+                    // Absolute symlink targets (e.g. /usr/local/bin/box64-real) are stored
+                    // as-is in Linux rootfs tarballs, but they need to be relative inside
+                    // the extracted tree. Convert: count directory depth of the symlink
+                    // and prepend that many "../" to make the target relative.
+                    if (linkTarget.startsWith("/")) {
+                        String n = entry.getName();
+                        if (n.startsWith("./")) n = n.substring(2);
+                        int depth = 0;
+                        for (int i = 0; i < n.length(); i++) if (n.charAt(i) == '/') depth++;
+                        StringBuilder rel = new StringBuilder();
+                        for (int i = 0; i < depth; i++) rel.append("../");
+                        linkTarget = rel.append(linkTarget.substring(1)).toString();
+                    }
                     java.nio.file.Files.deleteIfExists(out.toPath());
                     java.nio.file.Files.createSymbolicLink(
                             out.toPath(),
-                            java.nio.file.Paths.get(entry.getLinkName()));
+                            java.nio.file.Paths.get(linkTarget));
                 } catch (Exception ignored) {
                     Log.w(TAG, "symlink skipped: " + entry.getName());
                 }
