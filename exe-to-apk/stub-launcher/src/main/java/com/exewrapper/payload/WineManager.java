@@ -44,6 +44,12 @@ public class WineManager {
     private static final String RELEASES_LIST_API =
             "https://api.github.com/repos/brunodev85/winlator/releases?per_page=5";
 
+    // box64 is not bundled in the Winlator APK — it's a separately downloadable component.
+    private static final String BOX64_INDEX_URL =
+            "https://raw.githubusercontent.com/brunodev85/winlator/main/installable_components/box64/index.txt";
+    private static final String BOX64_BASE_URL =
+            "https://raw.githubusercontent.com/brunodev85/winlator/main/installable_components/box64/";
+
     // Entry name of the Linux rootfs inside the Winlator APK ZIP.
     private static final String ROOTFS_ASSET = "assets/rootfs.tzst";
 
@@ -198,18 +204,30 @@ public class WineManager {
         new File(runtimeDir(ctx), "tmp").mkdirs();
         setExecutable(runtimeDir(ctx));
 
+        // box64 not in APK — check rootfs, then download it as a separate component.
+        if (!foundBox64 && box64Exe(ctx).exists()) foundBox64 = true;
+
         if (!foundBox64) {
-            File b = box64Exe(ctx);
-            if (b.exists()) {
-                foundBox64 = true;
+            p.update("Downloading box64 component…", 88);
+            String index = httpGet(BOX64_INDEX_URL);
+            String[] lines = index.trim().split("\\s+");
+            String filename = lines[lines.length - 1].trim();
+            p.update("Downloading " + filename + "…", 90);
+            HttpURLConnection box64Conn = open(BOX64_BASE_URL + filename);
+            try (InputStream box64Http = box64Conn.getInputStream();
+                 ZstdCompressorInputStream zstd =
+                         new ZstdCompressorInputStream(new BufferedInputStream(box64Http, 65536));
+                 TarArchiveInputStream tar = new TarArchiveInputStream(zstd)) {
+                extractTar(tar, runtimeDir(ctx));
+            } finally {
+                box64Conn.disconnect();
             }
+            setExecutable(runtimeDir(ctx));
+            foundBox64 = box64Exe(ctx).exists();
         }
+
         if (!foundBox64) {
-            String libs = arm64Libs.isEmpty() ? "(none)"
-                    : android.text.TextUtils.join("\n", arm64Libs);
-            throw new IOException(
-                    "box64 not found in Winlator APK or rootfs.\n\n"
-                    + "ARM64 entries seen in APK:\n" + libs);
+            throw new IOException("box64 could not be found or downloaded.");
         }
 
         p.update("Wine runtime ready.", 100);
