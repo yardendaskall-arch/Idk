@@ -243,6 +243,20 @@ public class WineManager {
         //noinspection ResultOfMethodCallIgnored
         prefix.mkdirs();
 
+        // Clear Winlator's box64 rc files that hardcode Winlator-specific paths.
+        // box64 loads /etc/box64.box64rc (system) before $HOME/.box64rc (user), and
+        // BOX64_RCFILE only overrides the user rc, not the system one.
+        // Both files in the Winlator rootfs contain TMPDIR=/data/data/com.winlator/...
+        // which overrides our TMPDIR for every x86_64 process running under box64.
+        for (String rcRel : new String[]{"etc/box64.box64rc", "root/.box64rc"}) {
+            File rcFile = new File(rt, rcRel);
+            if (rcFile.exists()) {
+                try (java.io.FileOutputStream fos = new java.io.FileOutputStream(rcFile)) {
+                    // truncate to empty — no overrides
+                } catch (IOException ignored) {}
+            }
+        }
+
         // box64 is a Linux ARM64 glibc-linked binary (PT_INTERP=/lib/ld-linux-aarch64.so.1).
         // Android's kernel can't find that interpreter, so we invoke glibc's ld.so directly
         // — ld.so itself has no PT_INTERP and the kernel can exec it natively.
