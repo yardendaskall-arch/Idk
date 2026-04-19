@@ -329,6 +329,10 @@ public class WineManager {
         env.put("BOX64_DYNAREC",  "1");
         env.put("BOX64_LOG",      "0");
         env.put("BOX64_NOBANNER", "1");
+        // Prevent box64 from loading wine_rt/root/.box64rc which contains Winlator's
+        // hardcoded paths (e.g. TMPDIR=/data/data/com.winlator/files/rootfs/tmp).
+        // Without this, wineserver tries to mkdir at Winlator's path instead of ours.
+        env.put("BOX64_RCFILE", "/dev/null");
 
         try {
             return pb.start();
