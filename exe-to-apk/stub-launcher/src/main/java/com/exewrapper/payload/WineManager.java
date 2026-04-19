@@ -91,14 +91,18 @@ public class WineManager {
 
     private static File box64Exe(Context ctx) {
         File rt = runtimeDir(ctx);
-        // Prefer Bionic-linked box64 extracted from Winlator APK native libs.
-        File bionic = new File(rt, BOX64_BIONIC);
-        if (bionic.exists()) return bionic;
-        // Search common rootfs paths (in case rootfs ships a Bionic-linked box64).
+        // Prefer glibc-linked box64 from the rootfs. Winlator's Bionic box64 (extracted
+        // from the APK native libs) has /data/data/com.winlator/files/rootfs hardcoded as
+        // a syscall-level path prefix — it translates /tmp → that path regardless of TMPDIR.
+        // The rootfs glibc box64 is a standard Linux build without those translations;
+        // we launch it via ld.so (same as we do for the Bionic one already).
         for (String rel : new String[]{"usr/local/bin/box64", "usr/bin/box64", "bin/box64"}) {
             File f = new File(rt, rel);
             if (f.exists()) return f;
         }
+        // Fall back to Bionic box64 only if rootfs box64 is absent.
+        File bionic = new File(rt, BOX64_BIONIC);
+        if (bionic.exists()) return bionic;
         return new File(rt, BOX64_REL);
     }
 
