@@ -1,8 +1,11 @@
 package com.sheintrain;
 
 import android.app.Activity;
+import android.content.Context;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.CountDownTimer;
+import android.os.Vibrator;
 import android.speech.tts.TextToSpeech;
 import android.view.View;
 import android.widget.Button;
@@ -124,8 +127,30 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
     }
 
     private void announceDepature() {
+        vibrate();
         if (!ttsReady) return;
         tts.speak("Shane Train Departing", TextToSpeech.QUEUE_FLUSH, null, "shein_depart");
+    }
+
+    @SuppressWarnings("deprecation")
+    private void vibrate() {
+        Vibrator v = (Vibrator) getSystemService(Context.VIBRATOR_SERVICE);
+        if (v == null || !v.hasVibrator()) return;
+        // Pattern: off, short, gap, short, gap, long  (train chug then horn)
+        long[] pattern = {0, 200, 100, 200, 100, 600};
+        if (Build.VERSION.SDK_INT >= 26) {
+            // Use VibrationEffect via reflection to avoid compile dependency on API 26 stub
+            try {
+                Class<?> cls = Class.forName("android.os.VibrationEffect");
+                java.lang.reflect.Method create = cls.getMethod("createWaveform", long[].class, int.class);
+                Object effect = create.invoke(null, pattern, -1);
+                Vibrator.class.getMethod("vibrate", cls).invoke(v, effect);
+            } catch (Exception e) {
+                v.vibrate(pattern, -1);
+            }
+        } else {
+            v.vibrate(pattern, -1);
+        }
     }
 
     @Override
