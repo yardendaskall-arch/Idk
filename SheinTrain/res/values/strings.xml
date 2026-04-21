@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Shein Train</string>
+    <string name="title">SHEIN TRAIN</string>
+    <string name="subtitle">Departure Countdown</string>
+    <string name="minutes_label">MINUTES</string>
+    <string name="seconds_label">SECONDS</string>
+    <string name="start">START</string>
+    <string name="stop">STOP</string>
+    <string name="pick_time">Pick departure time</string>
+    <string name="departing_soon">DEPARTING!</string>
+    <string name="tts_phrase">Shein Train departing</string>
+</resources>
