@@ -7,11 +7,11 @@ import android.net.Uri;
 import android.os.Bundle;
 import android.text.InputType;
 import android.view.Gravity;
+import android.view.View;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.TextView;
-import android.view.View;
 
 public class MainActivity extends Activity {
 
@@ -111,15 +111,11 @@ public class MainActivity extends Activity {
             return;
         }
 
-        try {
-            Intent intent = new Intent(Intent.ACTION_CALL, Uri.parse("tel:" + number));
-            startActivity(intent);
-            callCount++;
-            String times = callCount == 1 ? "1 time" : callCount + " times";
-            statusText.setText("Called " + times + " — tap again if not found yet");
-            callBtn.setText("Call Again");
-        } catch (SecurityException e) {
-            statusText.setText("Permission denied. Please grant Call Phone permission in Settings.");
-        }
+        Intent intent = new Intent(Intent.ACTION_DIAL, Uri.parse("tel:" + number));
+        startActivity(intent);
+        callCount++;
+        String times = callCount == 1 ? "1 time" : callCount + " times";
+        statusText.setText("Called " + times + " — tap again if not found yet");
+        callBtn.setText("Call Again");
     }
 }
