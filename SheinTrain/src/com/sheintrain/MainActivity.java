@@ -92,6 +92,7 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
         pickerContainer.setVisibility(View.INVISIBLE);
         btnStart.setText(getString(R.string.stop));
         tvStatus.setText("Boarding closes in...");
+        announceCountdownStart(mins, secs);
 
         countDownTimer = new CountDownTimer(totalMs, 100) {
             @Override
@@ -124,6 +125,19 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
         btnStart.setText(getString(R.string.start));
         tvCountdown.setText("00:00");
         tvStatus.setText(getString(R.string.pick_time));
+    }
+
+    private void announceCountdownStart(int mins, int secs) {
+        if (!ttsReady) return;
+        StringBuilder sb = new StringBuilder("Shane Train departing in ");
+        if (mins > 0) {
+            sb.append(mins).append(mins == 1 ? " minute" : " minutes");
+            if (secs > 0) sb.append(" and ");
+        }
+        if (secs > 0) {
+            sb.append(secs).append(secs == 1 ? " second" : " seconds");
+        }
+        tts.speak(sb.toString(), TextToSpeech.QUEUE_FLUSH, null, "shein_start");
     }
 
     private void announceDepature() {
