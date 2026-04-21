@@ -125,7 +125,7 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
 
     private void announceDepature() {
         if (!ttsReady) return;
-        tts.speak("SHEIN TRAIN DEPARTING", TextToSpeech.QUEUE_FLUSH, null, "shein_depart");
+        tts.speak("Shane Train Departing", TextToSpeech.QUEUE_FLUSH, null, "shein_depart");
     }
 
     @Override
