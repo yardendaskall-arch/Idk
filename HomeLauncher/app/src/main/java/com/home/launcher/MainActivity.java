@@ -96,10 +96,9 @@ public class MainActivity extends Activity {
 
     // ── Filter state ──────────────────────────────────────────────────────
     private String currentCategory = "";
-    private String currentLetter   = "";
     private String currentSearch   = "";
-    private LinearLayout catPillRow, azRow, filterBar;
-    private TextView activeLetterPill, activeCatPill;
+    private LinearLayout catPillRow, filterBar;
+    private TextView activeCatPill;
 
     // ── Clock ─────────────────────────────────────────────────────────────
     private Handler clockHandler = new Handler();
@@ -123,8 +122,12 @@ public class MainActivity extends Activity {
     private static final int REQ_BIND_WIDGET = 2002;
 
     private static final String[] CATEGORIES = {
-        "ALL","GAMES","SOCIAL","MEDIA","TOOLS","BROWSER",
-        "FINANCE","HEALTH","SHOPPING","EDUCATION","SYSTEM","OTHER"
+        "ALL","GAMES","SOCIAL","COMM","MEDIA","TOOLS",
+        "FINANCE","HEALTH","SHOPPING","LEARN","SYSTEM","OTHER"
+    };
+    private static final String[] CAT_LABELS = {
+        "All","Games","Social","Comms","Media","Tools",
+        "Finance","Health","Shop","Learn","System","Other"
     };
 
     // ══════════════════════════════════════════════════════════════════════
@@ -999,8 +1002,6 @@ public class MainActivity extends Activity {
             public void onTextChanged(CharSequence s, int a, int b, int c) {
                 currentSearch = s.toString();
                 applyFilters();
-                if (filterBar != null)
-                    filterBar.setVisibility(currentSearch.isEmpty() ? View.GONE : View.VISIBLE);
             }
         });
 
@@ -1018,69 +1019,29 @@ public class MainActivity extends Activity {
         filterBar.setOrientation(LinearLayout.VERTICAL);
         filterBar.setLayoutParams(new LinearLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-        filterBar.setVisibility(View.GONE);
-
-        View sep = new View(this);
-        sep.setBackgroundColor(0x14FFFFFF);
-        LinearLayout.LayoutParams sepLp = new LinearLayout.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT, 1);
-        sepLp.setMargins(dp(24), 0, dp(24), 0);
-        sep.setLayoutParams(sepLp);
-        filterBar.addView(sep);
-
-        HorizontalScrollView azScroll = new HorizontalScrollView(this);
-        azScroll.setHorizontalScrollBarEnabled(false);
-        azScroll.setPadding(dp(10), dp(6), dp(10), dp(2));
-        azRow = new LinearLayout(this);
-        azRow.setOrientation(LinearLayout.HORIZONTAL);
-        azRow.setGravity(Gravity.CENTER_VERTICAL);
-
-        for (int i = 0; i < 26; i++) {
-            final String letter = String.valueOf((char)('A' + i));
-            final TextView pill = new TextView(this);
-            pill.setText(letter);
-            pill.setTextColor(0xAAFFFFFF);
-            pill.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11);
-            pill.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
-            pill.setGravity(Gravity.CENTER);
-            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(26), dp(26));
-            lp.setMargins(dp(2), 0, dp(2), 0);
-            pill.setLayoutParams(lp);
-            setLetterPillInactive(pill);
-            pill.setOnClickListener(new View.OnClickListener() {
-                @Override public void onClick(View v) {
-                    if (currentLetter.equals(letter)) {
-                        currentLetter = ""; setLetterPillInactive(pill); activeLetterPill = null;
-                    } else {
-                        if (activeLetterPill != null) setLetterPillInactive(activeLetterPill);
-                        currentLetter = letter; setLetterPillActive(pill); activeLetterPill = pill;
-                    }
-                    applyFilters();
-                }
-            });
-            azRow.addView(pill);
-        }
-        azScroll.addView(azRow);
-        filterBar.addView(azScroll);
 
         HorizontalScrollView catScroll = new HorizontalScrollView(this);
         catScroll.setHorizontalScrollBarEnabled(false);
-        catScroll.setPadding(dp(10), dp(4), dp(10), dp(10));
+        catScroll.setPadding(dp(10), dp(8), dp(10), dp(8));
+
         catPillRow = new LinearLayout(this);
         catPillRow.setOrientation(LinearLayout.HORIZONTAL);
         catPillRow.setGravity(Gravity.CENTER_VERTICAL);
 
-        for (final String cat : CATEGORIES) {
+        for (int i = 0; i < CATEGORIES.length; i++) {
+            final String cat   = CATEGORIES[i];
+            final String label = CAT_LABELS[i];
             final TextView pill = new TextView(this);
-            pill.setText(cat);
-            pill.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11);
+            pill.setTag(cat);
+            pill.setText(label);
+            pill.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
             pill.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
             pill.setGravity(Gravity.CENTER);
             LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT, dp(28));
-            lp.setMargins(dp(3), 0, dp(3), 0);
+                ViewGroup.LayoutParams.WRAP_CONTENT, dp(30));
+            lp.setMargins(dp(4), 0, dp(4), 0);
             pill.setLayoutParams(lp);
-            pill.setPadding(dp(14), 0, dp(14), 0);
+            pill.setPadding(dp(16), 0, dp(16), 0);
             if (cat.equals("ALL")) { setCatPillActive(pill); activeCatPill = pill; }
             else setCatPillInactive(pill);
             pill.setOnClickListener(new View.OnClickListener() {
@@ -1088,7 +1049,9 @@ public class MainActivity extends Activity {
                     if (activeCatPill != null) setCatPillInactive(activeCatPill);
                     currentCategory = cat.equals("ALL") ? "" : cat;
                     setCatPillActive(pill); activeCatPill = pill;
+                    if (appGrid != null) appGrid.setAlpha(0f);
                     applyFilters();
+                    if (appGrid != null) appGrid.animate().alpha(1f).setDuration(180).start();
                 }
             });
             catPillRow.addView(pill);
@@ -1098,24 +1061,22 @@ public class MainActivity extends Activity {
         return filterBar;
     }
 
-    private void setLetterPillActive(TextView pill) {
-        GradientDrawable bg = new GradientDrawable();
-        bg.setCornerRadius(dp(5)); bg.setColor(sm.getAccentColor());
-        pill.setBackground(bg); pill.setTextColor(0xFFFFFFFF);
-    }
-    private void setLetterPillInactive(TextView pill) {
-        pill.setBackground(null); pill.setTextColor(0x66FFFFFF);
-    }
     private void setCatPillActive(TextView pill) {
         GradientDrawable bg = new GradientDrawable();
-        bg.setCornerRadius(dp(14)); bg.setColor(sm.getAccentColor());
-        pill.setBackground(bg); pill.setTextColor(0xFFFFFFFF);
+        bg.setCornerRadius(dp(15));
+        bg.setColor(sm.getAccentColor());
+        pill.setBackground(bg);
+        pill.setTextColor(0xFFFFFFFF);
+        pill.setTypeface(Typeface.create("sans-serif-medium", Typeface.BOLD));
     }
     private void setCatPillInactive(TextView pill) {
         GradientDrawable bg = new GradientDrawable();
-        bg.setCornerRadius(dp(14)); bg.setColor(0x18FFFFFF);
-        bg.setStroke(1, 0x28FFFFFF);
-        pill.setBackground(bg); pill.setTextColor(0x88FFFFFF);
+        bg.setCornerRadius(dp(15));
+        bg.setColor(0x18FFFFFF);
+        bg.setStroke(1, 0x22FFFFFF);
+        pill.setBackground(bg);
+        pill.setTextColor(0x99FFFFFF);
+        pill.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
     }
 
     // ══════════════════════════════════════════════════════════════════════
@@ -1388,12 +1349,36 @@ public class MainActivity extends Activity {
         filteredApps.clear();
         for (AppInfo a : allApps) {
             if (!currentCategory.isEmpty() && !currentCategory.equals(a.category)) continue;
-            if (!currentLetter.isEmpty() &&
-                !a.label.toUpperCase(Locale.getDefault()).startsWith(currentLetter)) continue;
             if (!currentSearch.isEmpty() &&
                 !a.label.toLowerCase(Locale.getDefault()).contains(
                     currentSearch.toLowerCase(Locale.getDefault()))) continue;
             filteredApps.add(a);
+        }
+        // Update category pill counts
+        if (catPillRow != null && currentSearch.isEmpty()) {
+            java.util.Map<String, Integer> counts = new java.util.HashMap<String, Integer>();
+            for (AppInfo a2 : allApps) {
+                String c2 = a2.category;
+                counts.put(c2, (counts.containsKey(c2) ? counts.get(c2) : 0) + 1);
+            }
+            int total = allApps.size();
+            for (int pi = 0; pi < catPillRow.getChildCount(); pi++) {
+                View child = catPillRow.getChildAt(pi);
+                if (!(child instanceof TextView)) continue;
+                TextView pv = (TextView) child;
+                String catKey = (String) pv.getTag();
+                if (catKey == null) continue;
+                if (catKey.equals("ALL")) {
+                    pv.setText(CAT_LABELS[0] + " (" + total + ")");
+                } else {
+                    int cnt = counts.containsKey(catKey) ? counts.get(catKey) : 0;
+                    int labelIdx = 0;
+                    for (int li = 0; li < CATEGORIES.length; li++)
+                        if (CATEGORIES[li].equals(catKey)) { labelIdx = li; break; }
+                    pv.setText(cnt > 0 ? CAT_LABELS[labelIdx] + " (" + cnt + ")" : CAT_LABELS[labelIdx]);
+                    pv.setVisibility(cnt > 0 || catKey.equals(currentCategory) ? View.VISIBLE : View.GONE);
+                }
+            }
         }
         if (appGrid != null) {
             if (adapter == null) {
@@ -1467,17 +1452,49 @@ public class MainActivity extends Activity {
     }
 
     static String detectCategory(AppInfo a) {
-        String s = (a.packageName + " " + a.label).toLowerCase(Locale.getDefault());
-        if (contains(s,"game","minecraft","pubg","roblox","clash","chess","puzzle","rpg","arcade","sonic","mario","fortnite","candy","angry","bird","shoot","racing","fifa","nba","mlb","nfl","brawl","pokemon","hearthstone","dungeon","ludo","snake","tetris","solitaire","mahjong")) return "GAMES";
-        if (contains(s,"instagram","facebook","twitter","whatsapp","telegram","snapchat","tiktok","discord","reddit","linkedin","messenger","signal","viber","wechat","line","skype","kik","tumblr","pinterest","mastodon")) return "SOCIAL";
-        if (contains(s,"spotify","netflix","youtube","music","video","player","media","podcast","vlc","plex","tidal","deezer","soundcloud","audible","twitch","hulu","disney","amazon.video","prime.video","photos","gallery","camera","photo","film")) return "MEDIA";
-        if (contains(s,"chrome","firefox","opera","brave","browser","edge","duckduck","internet","dolphin","web","surf")) return "BROWSER";
-        if (contains(s,"bank","finance","money","paypal","cash","venmo","wallet","invest","crypto","bitcoin","trading","insurance","tax","mint","robinhood","coinbase")) return "FINANCE";
-        if (contains(s,"health","fitness","workout","gym","run","calories","diet","yoga","meditat","sleep","heart","steps","pedometer","strava","myfitnesspal","nike","adidas")) return "HEALTH";
-        if (contains(s,"shop","amazon","ebay","store","mall","walmart","target","etsy","wish","ali","market","cart","purchase","order")) return "SHOPPING";
-        if (contains(s,"learn","edu","school","course","quiz","study","math","science","duolingo","khan","udemy","coursera","dictionary","book","kindle","read","library")) return "EDUCATION";
-        if (contains(s,"settings","system","phone","dialer","launcher","clock","calendar","contacts","files","manager","backup","clean","security","antivirus","vpn","tools","utility","permission","root","adb","terminal","battery","cpu","ram","storage")) return "SYSTEM";
-        if (contains(s,"tool","util","note","todo","task","reminder","scanner","pdf","doc","excel","office","translate","map","navigation","weather","compass","calculator","converter","measure","barcode","qr")) return "TOOLS";
+        // Android 26+ provides app category from the manifest
+        if (android.os.Build.VERSION.SDK_INT >= 26) {
+            try {
+                android.content.pm.ApplicationInfo ai =
+                    a.icon.getConstantState() != null ? null : null; // placeholder
+                // We don't have a Context here; keyword fallback covers it
+            } catch (Exception ignored) {}
+        }
+        String s = (a.packageName + " " + a.label).toLowerCase(java.util.Locale.getDefault());
+        if (contains(s,"game","minecraft","pubg","roblox","clash","chess","puzzle","rpg","arcade",
+            "sonic","mario","fortnite","candy","angry","bird","shoot","racing","fifa","nba","mlb",
+            "nfl","brawl","pokemon","hearthstone","dungeon","ludo","snake","tetris","solitaire",
+            "mahjong","casual","adventure","strategy","simulation","tower.defense")) return "GAMES";
+        if (contains(s,"instagram","facebook","twitter","tiktok","snapchat","reddit","linkedin",
+            "tumblr","pinterest","mastodon","threads","bluesky","vk.com","weibo")) return "SOCIAL";
+        if (contains(s,"whatsapp","telegram","discord","messenger","signal","viber","wechat",
+            "line","skype","kik","zoom","meet","teams","slack","chat","sms","dialer",
+            "phone","messages","contacts","mail","gmail","outlook","protonmail","yahoo.mail")) return "COMM";
+        if (contains(s,"spotify","netflix","youtube","music","video","player","media","podcast",
+            "vlc","plex","tidal","deezer","soundcloud","audible","twitch","hulu","disney",
+            "amazon.video","prime.video","photos","gallery","camera")) return "MEDIA";
+        if (contains(s,"chrome","firefox","opera","brave","browser","edge","duckduck",
+            "internet","dolphin","web","surf","vivaldi","tor")) return "TOOLS";
+        if (contains(s,"bank","finance","money","paypal","cash","venmo","wallet","invest",
+            "crypto","bitcoin","trading","insurance","tax","mint","robinhood","coinbase",
+            "revolut","wise","n26","monzo","stripe","square")) return "FINANCE";
+        if (contains(s,"health","fitness","workout","gym","run","calories","diet","yoga",
+            "meditat","sleep","heart","steps","pedometer","strava","myfitnesspal",
+            "nike","adidas","samsung.health","google.fit","headspace","calm")) return "HEALTH";
+        if (contains(s,"shop","amazon","ebay","store","mall","walmart","target","etsy",
+            "wish","aliexpress","alibaba","market","cart","purchase","order","delivery",
+            "doordash","uber.eats","grubhub","instacart")) return "SHOPPING";
+        if (contains(s,"learn","edu","school","course","quiz","study","math","science",
+            "duolingo","khan","udemy","coursera","dictionary","book","kindle","read",
+            "library","wikipedia","encyclopedia","tutorial")) return "LEARN";
+        if (contains(s,"settings","system","launcher","clock","files","manager","backup",
+            "clean","security","antivirus","vpn","tools","utility","permission","root",
+            "adb","terminal","battery","cpu","ram","storage","cleaner","booster",
+            "samsung","huawei.phone","miui","oneplus","pixel","android")) return "SYSTEM";
+        if (contains(s,"tool","util","note","todo","task","reminder","scanner","pdf",
+            "doc","excel","office","translate","map","navigation","weather","compass",
+            "calculator","converter","measure","barcode","qr","password","authenticator",
+            "remote","ssh","ftp","editor","draw","paint")) return "TOOLS";
         return "OTHER";
     }
     private static boolean contains(String src, String... keys) {
@@ -1871,7 +1888,11 @@ public class MainActivity extends Activity {
                 LinearLayout cell = new LinearLayout(MainActivity.this);
                 cell.setOrientation(LinearLayout.VERTICAL);
                 cell.setGravity(Gravity.CENTER_HORIZONTAL);
-                cell.setPadding(dp(4), dp(10), dp(4), dp(8));
+                cell.setPadding(dp(6), dp(12), dp(6), dp(10));
+                GradientDrawable cellBg = new GradientDrawable();
+                cellBg.setColor(0x10FFFFFF);
+                cellBg.setCornerRadius(dp(12));
+                cell.setBackground(cellBg);
 
                 FrameLayout frame = new FrameLayout(MainActivity.this);
                 int iconDp = sm.getIconSizeDp();
