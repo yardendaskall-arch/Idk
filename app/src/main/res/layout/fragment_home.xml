@@ -1,0 +1,143 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.coordinatorlayout.widget.CoordinatorLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/background">
+
+    <com.google.android.material.appbar.AppBarLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:elevation="0dp"
+        app:liftOnScroll="true"
+        app:liftOnScrollTargetViewId="@id/rvCountries">
+
+        <com.google.android.material.appbar.MaterialToolbar
+            android:id="@+id/toolbar"
+            android:layout_width="match_parent"
+            android:layout_height="?attr/actionBarSize"
+            android:background="@color/background"
+            app:title="@string/app_name"
+            app:titleTextColor="@color/on_background"
+            app:titleTextAppearance="@style/TextAppearance.GlobalVPN.Title" />
+
+    </com.google.android.material.appbar.AppBarLayout>
+
+    <androidx.core.widget.NestedScrollView
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        app:layout_behavior="@string/appbar_scrolling_view_behavior">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:padding="16dp">
+
+            <!-- Connection Card -->
+            <com.google.android.material.card.MaterialCardView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="16dp"
+                app:cardBackgroundColor="@color/surface"
+                app:cardCornerRadius="24dp"
+                app:cardElevation="0dp"
+                app:strokeColor="@color/outline"
+                app:strokeWidth="1dp">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:padding="24dp">
+
+                    <!-- Status -->
+                    <TextView
+                        android:id="@+id/tvStatus"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_gravity="center_horizontal"
+                        android:text="● Disconnected"
+                        android:textColor="@color/status_disconnected"
+                        android:textSize="14sp"
+                        android:fontFamily="sans-serif-medium"
+                        android:layout_marginBottom="16dp" />
+
+                    <!-- Shield Icon -->
+                    <ImageView
+                        android:layout_width="100dp"
+                        android:layout_height="100dp"
+                        android:layout_gravity="center_horizontal"
+                        android:src="@drawable/ic_shield"
+                        android:tint="@color/primary"
+                        android:layout_marginBottom="16dp"
+                        android:contentDescription="VPN shield" />
+
+                    <!-- Selected Country -->
+                    <TextView
+                        android:id="@+id/tvSelectedCountry"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_gravity="center_horizontal"
+                        android:text="No location selected"
+                        android:textColor="@color/on_surface"
+                        android:textSize="18sp"
+                        android:fontFamily="sans-serif-medium"
+                        android:layout_marginBottom="8dp" />
+
+                    <TextView
+                        android:id="@+id/tvNoSelection"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_gravity="center_horizontal"
+                        android:text="Select a country from the list below"
+                        android:textColor="@color/on_surface_variant"
+                        android:textSize="13sp"
+                        android:layout_marginBottom="24dp" />
+
+                    <!-- Progress Bar -->
+                    <ProgressBar
+                        android:id="@+id/progressBar"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_gravity="center_horizontal"
+                        android:visibility="gone"
+                        android:layout_marginBottom="8dp" />
+
+                    <!-- Connect Button -->
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btnConnect"
+                        android:layout_width="match_parent"
+                        android:layout_height="56dp"
+                        android:text="Connect"
+                        android:textSize="16sp"
+                        app:cornerRadius="16dp"
+                        app:backgroundTint="@color/primary" />
+
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
+
+            <!-- Countries Header -->
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Select Location"
+                android:textColor="@color/on_background"
+                android:textSize="16sp"
+                android:fontFamily="sans-serif-medium"
+                android:layout_marginBottom="8dp"
+                android:layout_marginStart="4dp" />
+
+            <!-- Countries List -->
+            <androidx.recyclerview.widget.RecyclerView
+                android:id="@+id/rvCountries"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:nestedScrollingEnabled="false"
+                android:clipToPadding="false" />
+
+        </LinearLayout>
+    </androidx.core.widget.NestedScrollView>
+
+</androidx.coordinatorlayout.widget.CoordinatorLayout>

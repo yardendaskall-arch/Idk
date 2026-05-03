@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">GlobalVPN</string>
+    <string name="connect">Connect</string>
+    <string name="disconnect">Disconnect</string>
+    <string name="connecting">Connecting…</string>
+    <string name="disconnecting">Disconnecting…</string>
+    <string name="status_connected">Connected</string>
+    <string name="status_disconnected">Disconnected</string>
+    <string name="select_country">Select a country</string>
+    <string name="no_selection">Select a location from the list below</string>
+    <string name="vpn_notification_channel">VPN Status</string>
+    <string name="vpn_connected_title">VPN Connected</string>
+    <string name="vpn_connecting_title">VPN Connecting…</string>
+</resources>

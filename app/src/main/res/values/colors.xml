@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Brand -->
+    <color name="primary">#6750A4</color>
+    <color name="on_primary">#FFFFFF</color>
+    <color name="primary_container">#EADDFF</color>
+    <color name="on_primary_container">#21005D</color>
+
+    <!-- Surfaces -->
+    <color name="background">#FFFBFE</color>
+    <color name="on_background">#1C1B1F</color>
+    <color name="surface">#FFFBFE</color>
+    <color name="on_surface">#1C1B1F</color>
+    <color name="on_surface_variant">#49454F</color>
+    <color name="outline">#79747E</color>
+    <color name="surface_variant">#E7E0EC</color>
+
+    <!-- Status colors -->
+    <color name="status_connected">#00C853</color>
+    <color name="status_disconnected">#F44336</color>
+    <color name="status_connecting">#FF9800</color>
+
+    <!-- Compat aliases -->
+    <color name="colorPrimary">#6750A4</color>
+    <color name="colorPrimaryVariant">#3700B3</color>
+    <color name="colorOnPrimary">#FFFFFF</color>
+    <color name="colorSecondary">#625B71</color>
+    <color name="colorOnSecondary">#FFFFFF</color>
+    <color name="colorError">#B00020</color>
+    <color name="colorOnError">#FFFFFF</color>
+    <color name="colorSurface">#FFFBFE</color>
+    <color name="colorOnSurface">#1C1B1F</color>
+</resources>
