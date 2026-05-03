@@ -47,7 +47,7 @@ android {
 
 dependencies {
     // WireGuard Android tunnel library
-    implementation("com.wireguard.android:tunnel:1.0.20230106")
+    implementation("com.wireguard.android:tunnel:1.0.20230706")
 
     // Networking
     implementation("com.squareup.okhttp3:okhttp:4.11.0")
