@@ -37,15 +37,11 @@
             </intent-filter>
         </service>
 
-        <!-- Our own VPN management service -->
+        <!-- VPN management service -->
         <service
             android:name=".service.GlobalVpnService"
             android:exported="false"
-            android:foregroundServiceType="specialUse">
-            <property
-                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
-                android:value="VPN management service" />
-        </service>
+            android:foregroundServiceType="specialUse" />
 
     </application>
 

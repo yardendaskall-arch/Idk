@@ -10,6 +10,7 @@ import android.content.Intent
 import android.os.Binder
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
+import androidx.core.app.ServiceCompat
 import com.globalvpn.app.MainActivity
 import com.globalvpn.app.R
 import com.wireguard.android.backend.GoBackend
@@ -49,7 +50,7 @@ class GlobalVpnService : Service() {
             val mapped = when (newState) {
                 Tunnel.State.UP -> State.CONNECTED
                 Tunnel.State.DOWN -> State.IDLE
-                Tunnel.State.TOGGLE -> currentState
+                else -> currentState  // TOGGLE or future states
             }
             updateState(mapped)
         }
@@ -100,7 +101,7 @@ class GlobalVpnService : Service() {
             } catch (_: Exception) {
             } finally {
                 updateState(State.IDLE)
-                stopForeground(STOP_FOREGROUND_REMOVE)
+                ServiceCompat.stopForeground(this@GlobalVpnService, ServiceCompat.STOP_FOREGROUND_REMOVE)
                 stopSelf()
             }
         }
