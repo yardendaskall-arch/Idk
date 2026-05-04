@@ -21,7 +21,6 @@ import androidx.recyclerview.widget.RecyclerView
 import com.globalvpn.app.R
 import com.globalvpn.app.service.GlobalVpnService
 import com.globalvpn.app.viewmodel.VpnViewModel
-import com.wireguard.android.backend.GoBackend
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 
@@ -122,7 +121,7 @@ class HomeFragment : Fragment() {
     }
 
     private fun requestVpnPermissionAndConnect() {
-        val intent = GoBackend.prepare(requireContext())
+        val intent = android.net.VpnService.prepare(requireContext())
         if (intent != null) {
             startActivityForResult(intent, REQUEST_VPN_PERMISSION)
         } else {
