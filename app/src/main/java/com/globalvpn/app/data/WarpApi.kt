@@ -1,17 +1,11 @@
 package com.globalvpn.app.data
 
 import com.wireguard.crypto.KeyPair
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.async
-import kotlinx.coroutines.awaitAll
-import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
-import java.net.InetSocketAddress
-import java.net.Socket
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -24,12 +18,6 @@ class WarpApi {
         .connectTimeout(15, TimeUnit.SECONDS)
         .readTimeout(15, TimeUnit.SECONDS)
         .build()
-
-    private val CANDIDATE_IPS = listOf(
-        "162.159.193.1", "162.159.192.1", "162.159.195.1", "162.159.194.1",
-        "188.114.96.1",  "188.114.97.1",  "188.114.98.1",  "188.114.99.1"
-    )
-    private val WARP_PORT = 2408
 
     suspend fun register(): WarpCredentials {
         val keyPair = KeyPair()
@@ -68,47 +56,25 @@ class WarpApi {
         val peer = peers.getJSONObject(0)
         val endpointObj = peer.getJSONObject("endpoint")
 
-        val apiEndpoint = endpointObj.optString("v4").takeIf { it.isNotEmpty() }
+        // Use the exact endpoint the API assigns — it is paired with the server
+        // public key. Using any other IP breaks the WireGuard handshake.
+        val endpoint = endpointObj.optString("v4").takeIf { it.isNotEmpty() }
             ?: endpointObj.getString("host")
-        val bestEndpoint = findFastestEndpoint(apiEndpoint)
 
         return WarpCredentials(
             privateKey = privateKey,
             clientAddress = addresses.getString("v4"),
             clientAddressV6 = addresses.optString("v6", ""),
             serverPublicKey = peer.getString("public_key"),
-            serverEndpoint = bestEndpoint
+            serverEndpoint = endpoint
         )
     }
 
-    private suspend fun findFastestEndpoint(fallback: String): String =
-        withContext(Dispatchers.IO) {
-            val results = CANDIDATE_IPS.map { ip ->
-                async {
-                    Pair("$ip:$WARP_PORT", tcpLatency(ip, 80))
-                }
-            }.awaitAll()
-
-            results.filter { it.second < Long.MAX_VALUE }
-                .minByOrNull { it.second }
-                ?.first ?: fallback
-        }
-
-    private fun tcpLatency(host: String, port: Int): Long {
-        return try {
-            val start = System.currentTimeMillis()
-            Socket().use { it.connect(InetSocketAddress(host, port), 2000) }
-            System.currentTimeMillis() - start
-        } catch (_: Exception) {
-            Long.MAX_VALUE
-        }
-    }
-
     fun buildWireGuardConfig(creds: WarpCredentials): String {
-        // Only include IPv6 routing when we have a proper IPv6 tunnel address.
-        // Without it, ::/0 causes Happy Eyeballs to try IPv6 first on every
-        // connection, fail inside the tunnel, and wait seconds before falling
-        // back to IPv4 — the main cause of "hell" page-load latency.
+        // Only add ::/0 when we have a proper IPv6 tunnel address.
+        // Without it, Happy Eyeballs tries IPv6 first on every dual-stack site,
+        // the packet enters the tunnel but has nowhere to go, and the browser
+        // waits several seconds before falling back to IPv4 — causing hell latency.
         val hasV6 = creds.clientAddressV6.isNotEmpty()
         val addresses = if (hasV6) "${creds.clientAddress}/32, ${creds.clientAddressV6}/128"
                         else "${creds.clientAddress}/32"
