@@ -17,7 +17,7 @@ class ServerRepository(context: Context) {
         private const val KEY_WARP_SERVER_KEY = "warp_server_key"
         private const val KEY_WARP_ENDPOINT = "warp_endpoint"
         private const val KEY_CREDS_VERSION = "creds_version"
-        private const val CREDS_VERSION = 2  // bump to invalidate cached credentials
+        private const val CREDS_VERSION = 3  // bump to invalidate cached credentials
 
         // Cloudflare PoP locations (city → country code + name)
         val CLOUDFLARE_LOCATIONS = listOf(
