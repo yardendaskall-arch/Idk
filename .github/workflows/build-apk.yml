@@ -37,7 +37,7 @@ jobs:
           ./gradlew --version
 
       - name: Build debug APK
-        run: ./gradlew assembleDebug --stacktrace --warning-mode all 2>&1 | tee build-debug.log; exit ${PIPESTATUS[0]}
+        run: ./gradlew assembleDebug --stacktrace --info 2>&1 | tee build-debug.log; exit ${PIPESTATUS[0]}
 
       - name: Upload build log on failure
         if: failure()

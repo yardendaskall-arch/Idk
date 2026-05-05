@@ -27,16 +27,6 @@
             </intent-filter>
         </activity>
 
-        <!-- WireGuard VPN service (managed by WireGuard library) -->
-        <service
-            android:name="com.wireguard.android.backend.GoBackend$VpnService"
-            android:exported="true"
-            android:permission="android.permission.BIND_VPN_SERVICE">
-            <intent-filter>
-                <action android:name="android.net.VpnService" />
-            </intent-filter>
-        </service>
-
         <!-- VPN management service -->
         <service
             android:name=".service.GlobalVpnService"
