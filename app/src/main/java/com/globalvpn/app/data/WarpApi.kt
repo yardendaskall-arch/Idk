@@ -56,11 +56,15 @@ class WarpApi {
         val peer = peers.getJSONObject(0)
         val endpointObj = peer.getJSONObject("endpoint")
 
+        // v4/host fields already include the port (e.g. "162.159.193.1:2408")
+        val endpoint = endpointObj.optString("v4").takeIf { it.isNotEmpty() }
+            ?: endpointObj.getString("host")
+
         return WarpCredentials(
             privateKey = privateKey,
             clientAddress = addresses.getString("v4"),
             serverPublicKey = peer.getString("public_key"),
-            serverEndpoint = "${endpointObj.getString("host")}:2408"
+            serverEndpoint = endpoint
         )
     }
 

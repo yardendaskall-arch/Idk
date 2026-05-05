@@ -16,6 +16,8 @@ class ServerRepository(context: Context) {
         private const val KEY_WARP_ADDRESS = "warp_address"
         private const val KEY_WARP_SERVER_KEY = "warp_server_key"
         private const val KEY_WARP_ENDPOINT = "warp_endpoint"
+        private const val KEY_CREDS_VERSION = "creds_version"
+        private const val CREDS_VERSION = 2  // bump to invalidate cached credentials
 
         // Cloudflare PoP locations (city → country code + name)
         val CLOUDFLARE_LOCATIONS = listOf(
@@ -63,9 +65,11 @@ class ServerRepository(context: Context) {
     }
 
     fun hasSavedCredentials(): Boolean =
-        prefs.getString(KEY_WARP_PRIVATE_KEY, null) != null
+        prefs.getString(KEY_WARP_PRIVATE_KEY, null) != null &&
+        prefs.getInt(KEY_CREDS_VERSION, 0) == CREDS_VERSION
 
     fun getSavedCredentials(): WarpCredentials? {
+        if (prefs.getInt(KEY_CREDS_VERSION, 0) != CREDS_VERSION) return null
         val pk = prefs.getString(KEY_WARP_PRIVATE_KEY, null) ?: return null
         return WarpCredentials(
             privateKey = pk,
@@ -81,6 +85,7 @@ class ServerRepository(context: Context) {
             .putString(KEY_WARP_ADDRESS, creds.clientAddress)
             .putString(KEY_WARP_SERVER_KEY, creds.serverPublicKey)
             .putString(KEY_WARP_ENDPOINT, creds.serverEndpoint)
+            .putInt(KEY_CREDS_VERSION, CREDS_VERSION)
             .apply()
     }
 
