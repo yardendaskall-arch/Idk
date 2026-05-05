@@ -36,7 +36,8 @@ data class Country(
 
 data class WarpCredentials(
     val privateKey: String,
-    val clientAddress: String,
+    val clientAddress: String,    // IPv4
+    val clientAddressV6: String,  // IPv6, empty if API didn't return one
     val serverPublicKey: String,
     val serverEndpoint: String
 )

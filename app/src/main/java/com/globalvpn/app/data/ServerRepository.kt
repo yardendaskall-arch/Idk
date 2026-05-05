@@ -14,10 +14,11 @@ class ServerRepository(context: Context) {
     companion object {
         private const val KEY_WARP_PRIVATE_KEY = "warp_private_key"
         private const val KEY_WARP_ADDRESS = "warp_address"
+        private const val KEY_WARP_ADDRESS_V6 = "warp_address_v6"
         private const val KEY_WARP_SERVER_KEY = "warp_server_key"
         private const val KEY_WARP_ENDPOINT = "warp_endpoint"
         private const val KEY_CREDS_VERSION = "creds_version"
-        private const val CREDS_VERSION = 3  // bump to invalidate cached credentials
+        private const val CREDS_VERSION = 4  // bump to invalidate cached credentials
 
         // Cloudflare PoP locations (city → country code + name)
         val CLOUDFLARE_LOCATIONS = listOf(
@@ -74,6 +75,7 @@ class ServerRepository(context: Context) {
         return WarpCredentials(
             privateKey = pk,
             clientAddress = prefs.getString(KEY_WARP_ADDRESS, "") ?: "",
+            clientAddressV6 = prefs.getString(KEY_WARP_ADDRESS_V6, "") ?: "",
             serverPublicKey = prefs.getString(KEY_WARP_SERVER_KEY, "") ?: "",
             serverEndpoint = prefs.getString(KEY_WARP_ENDPOINT, "") ?: ""
         )
@@ -83,6 +85,7 @@ class ServerRepository(context: Context) {
         prefs.edit()
             .putString(KEY_WARP_PRIVATE_KEY, creds.privateKey)
             .putString(KEY_WARP_ADDRESS, creds.clientAddress)
+            .putString(KEY_WARP_ADDRESS_V6, creds.clientAddressV6)
             .putString(KEY_WARP_SERVER_KEY, creds.serverPublicKey)
             .putString(KEY_WARP_ENDPOINT, creds.serverEndpoint)
             .putInt(KEY_CREDS_VERSION, CREDS_VERSION)

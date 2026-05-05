@@ -25,8 +25,6 @@ class WarpApi {
         .readTimeout(15, TimeUnit.SECONDS)
         .build()
 
-    // Known Cloudflare WARP anycast IPs — all route to the nearest PoP.
-    // We test TCP port 80 (Cloudflare serves HTTP) to rank them by latency.
     private val CANDIDATE_IPS = listOf(
         "162.159.193.1", "162.159.192.1", "162.159.195.1", "162.159.194.1",
         "188.114.96.1",  "188.114.97.1",  "188.114.98.1",  "188.114.99.1"
@@ -70,15 +68,14 @@ class WarpApi {
         val peer = peers.getJSONObject(0)
         val endpointObj = peer.getJSONObject("endpoint")
 
-        // v4/host already include port (e.g. "162.159.193.1:2408") — use as fallback
         val apiEndpoint = endpointObj.optString("v4").takeIf { it.isNotEmpty() }
             ?: endpointObj.getString("host")
-
         val bestEndpoint = findFastestEndpoint(apiEndpoint)
 
         return WarpCredentials(
             privateKey = privateKey,
             clientAddress = addresses.getString("v4"),
+            clientAddressV6 = addresses.optString("v6", ""),
             serverPublicKey = peer.getString("public_key"),
             serverEndpoint = bestEndpoint
         )
@@ -88,16 +85,13 @@ class WarpApi {
         withContext(Dispatchers.IO) {
             val results = CANDIDATE_IPS.map { ip ->
                 async {
-                    val latency = tcpLatency(ip, 80)  // Cloudflare serves HTTP on these IPs
-                    Pair("$ip:$WARP_PORT", latency)
+                    Pair("$ip:$WARP_PORT", tcpLatency(ip, 80))
                 }
             }.awaitAll()
 
-            results
-                .filter { it.second < Long.MAX_VALUE }
+            results.filter { it.second < Long.MAX_VALUE }
                 .minByOrNull { it.second }
-                ?.first
-                ?: fallback
+                ?.first ?: fallback
         }
 
     private fun tcpLatency(host: String, port: Int): Long {
@@ -110,17 +104,28 @@ class WarpApi {
         }
     }
 
-    fun buildWireGuardConfig(creds: WarpCredentials): String = """
-        [Interface]
-        PrivateKey = ${creds.privateKey}
-        Address = ${creds.clientAddress}/32
-        DNS = 1.1.1.1, 1.0.0.1
-        MTU = 1280
+    fun buildWireGuardConfig(creds: WarpCredentials): String {
+        // Only include IPv6 routing when we have a proper IPv6 tunnel address.
+        // Without it, ::/0 causes Happy Eyeballs to try IPv6 first on every
+        // connection, fail inside the tunnel, and wait seconds before falling
+        // back to IPv4 — the main cause of "hell" page-load latency.
+        val hasV6 = creds.clientAddressV6.isNotEmpty()
+        val addresses = if (hasV6) "${creds.clientAddress}/32, ${creds.clientAddressV6}/128"
+                        else "${creds.clientAddress}/32"
+        val allowedIPs = if (hasV6) "0.0.0.0/0, ::/0" else "0.0.0.0/0"
 
-        [Peer]
-        PublicKey = ${creds.serverPublicKey}
-        AllowedIPs = 0.0.0.0/0, ::/0
-        Endpoint = ${creds.serverEndpoint}
-        PersistentKeepalive = 25
-    """.trimIndent()
+        return """
+            [Interface]
+            PrivateKey = ${creds.privateKey}
+            Address = $addresses
+            DNS = 1.1.1.1, 1.0.0.1
+            MTU = 1420
+
+            [Peer]
+            PublicKey = ${creds.serverPublicKey}
+            AllowedIPs = $allowedIPs
+            Endpoint = ${creds.serverEndpoint}
+            PersistentKeepalive = 25
+        """.trimIndent()
+    }
 }
