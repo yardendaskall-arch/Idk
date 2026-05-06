@@ -19,11 +19,14 @@ import com.wireguard.config.Config
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import java.io.BufferedReader
 import java.io.StringReader
+import java.net.InetSocketAddress
+import java.net.Socket
 
 class GlobalVpnService : Service() {
 
@@ -39,7 +42,7 @@ class GlobalVpnService : Service() {
     private lateinit var backend: GoBackend
     private var currentState = State.IDLE
     private var currentCountry: String = ""
-    private var errorMessage: String = ""
+    var errorMessage: String = ""
 
     private val _stateFlow = MutableStateFlow(State.IDLE)
     val stateFlow: StateFlow<State> get() = _stateFlow
@@ -49,8 +52,8 @@ class GlobalVpnService : Service() {
         override fun onStateChange(newState: Tunnel.State) {
             val mapped = when (newState) {
                 Tunnel.State.UP -> State.CONNECTED
-                Tunnel.State.DOWN -> State.IDLE
-                else -> currentState  // TOGGLE or future states
+                Tunnel.State.DOWN -> if (currentState == State.DISCONNECTING) State.IDLE else currentState
+                else -> currentState
             }
             updateState(mapped)
         }
@@ -82,14 +85,64 @@ class GlobalVpnService : Service() {
         startForeground(NOTIFICATION_ID, buildNotification())
 
         scope.launch {
-            try {
-                val config = Config.parse(BufferedReader(StringReader(configString)))
-                backend.setState(tunnel, Tunnel.State.UP, config)
-            } catch (e: Exception) {
-                errorMessage = e.message ?: "Connection failed"
+            // Cloudflare WARP supports multiple UDP ports. Try each in order
+            // until one passes a live connectivity check. UDP 2408 is often
+            // blocked on corporate/hotel/restrictive networks.
+            val ports = listOf(2408, 500, 1701, 4500)
+            var connected = false
+
+            for (port in ports) {
+                val cfg = configString.withPort(port)
+                try {
+                    val parsed = Config.parse(BufferedReader(StringReader(cfg)))
+                    backend.setState(tunnel, Tunnel.State.UP, parsed)
+                } catch (e: Exception) {
+                    errorMessage = e.message ?: "Config parse error"
+                    continue
+                }
+
+                // Give the WireGuard handshake up to 7 seconds to complete
+                delay(7000)
+
+                if (tunnelIsAlive()) {
+                    connected = true
+                    break
+                }
+
+                // Tear down before trying next port
+                runCatching { backend.setState(tunnel, Tunnel.State.DOWN, null) }
+                delay(500)
+            }
+
+            if (!connected) {
+                errorMessage = if (errorMessage.isNotEmpty()) errorMessage
+                               else "No UDP port responded (tried 2408, 500, 1701, 4500). " +
+                                    "Try a different network."
                 updateState(State.ERROR)
+                ServiceCompat.stopForeground(this@GlobalVpnService, ServiceCompat.STOP_FOREGROUND_REMOVE)
                 stopSelf()
             }
+        }
+    }
+
+    // Test whether the tunnel is actually forwarding traffic by opening a
+    // TCP connection to 1.1.1.1:80 through the VPN interface.
+    private fun tunnelIsAlive(): Boolean {
+        return try {
+            Socket().use { socket ->
+                socket.connect(InetSocketAddress("1.1.1.1", 80), 4000)
+            }
+            true
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    // Replace the Endpoint port in a WireGuard config string.
+    private fun String.withPort(port: Int): String {
+        // Matches "Endpoint = host:oldport" and replaces the port.
+        return replace(Regex("""(Endpoint\s*=\s*\S+):(\d+)""")) { mr ->
+            "${mr.groupValues[1]}:$port"
         }
     }
 
@@ -108,7 +161,6 @@ class GlobalVpnService : Service() {
     }
 
     fun getCurrentState(): State = currentState
-
     fun getErrorMessage(): String = errorMessage
 
     private fun updateState(state: State) {
@@ -134,7 +186,7 @@ class GlobalVpnService : Service() {
 
         val title = when (currentState) {
             State.CONNECTING -> "Connecting to $currentCountry…"
-            State.CONNECTED -> "Connected · $currentCountry"
+            State.CONNECTED  -> "Connected · $currentCountry"
             State.DISCONNECTING -> "Disconnecting…"
             else -> "GlobalVPN"
         }
@@ -152,12 +204,8 @@ class GlobalVpnService : Service() {
 
     private fun createNotificationChannel() {
         val channel = NotificationChannel(
-            CHANNEL_ID,
-            "VPN Status",
-            NotificationManager.IMPORTANCE_LOW
-        ).apply {
-            description = "Shows active VPN connection status"
-        }
+            CHANNEL_ID, "VPN Status", NotificationManager.IMPORTANCE_LOW
+        ).apply { description = "Shows active VPN connection status" }
         (getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager)
             .createNotificationChannel(channel)
     }

@@ -84,8 +84,8 @@ class WarpApi {
             [Interface]
             PrivateKey = ${creds.privateKey}
             Address = $addresses
-            DNS = 1.1.1.1, 1.0.0.1
-            MTU = 1420
+            DNS = 1.1.1.1, 1.0.0.1, 8.8.8.8
+            MTU = 1280
 
             [Peer]
             PublicKey = ${creds.serverPublicKey}
