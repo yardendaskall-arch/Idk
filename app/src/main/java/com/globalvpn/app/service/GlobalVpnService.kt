@@ -161,7 +161,6 @@ class GlobalVpnService : Service() {
     }
 
     fun getCurrentState(): State = currentState
-    fun getErrorMessage(): String = errorMessage
 
     private fun updateState(state: State) {
         currentState = state
