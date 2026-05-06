@@ -184,7 +184,7 @@ class HomeFragment : Fragment() {
                     tvStatus.setTextColor(requireContext().getColor(R.color.status_disconnected))
                     btnConnect.text = "Connect"
                     btnConnect.isEnabled = true
-                    val msg = vpnService?.getErrorMessage()?.takeIf { it.isNotEmpty() } ?: "Connection failed"
+                    val msg = vpnService?.errorMessage?.takeIf { it.isNotEmpty() } ?: "Connection failed"
                     Toast.makeText(requireContext(), msg, Toast.LENGTH_LONG).show()
                 }
             }
