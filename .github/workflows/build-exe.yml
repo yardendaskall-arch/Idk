@@ -1,0 +1,32 @@
+name: Build Windows EXE
+
+on:
+  push:
+    branches: [ claude/vpn-app-development-QVkcn, main ]
+  workflow_dispatch:
+
+jobs:
+  build-exe:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install -r windows/requirements.txt
+
+      - name: Build EXE
+        run: |
+          cd windows
+          pyinstaller --onefile --windowed --uac-admin --name GlobalVPN vpn_app.py
+
+      - name: Upload EXE
+        uses: actions/upload-artifact@v4
+        with:
+          name: GlobalVPN-Windows
+          path: windows/dist/GlobalVPN.exe
+          retention-days: 30
