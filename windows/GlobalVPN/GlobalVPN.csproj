@@ -9,7 +9,5 @@
     <AssemblyName>GlobalVPN</AssemblyName>
     <Platforms>x64</Platforms>
   </PropertyGroup>
-  <ItemGroup>
-    <PackageReference Include="NSec.Cryptography" Version="23.9.0" />
-  </ItemGroup>
+
 </Project>

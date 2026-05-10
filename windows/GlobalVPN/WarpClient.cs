@@ -1,7 +1,7 @@
 using System.Net.Http;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
-using NSec.Cryptography;
 
 namespace GlobalVPN;
 
@@ -28,10 +28,10 @@ public static class WarpClient
 
     private static (string Priv, string Pub) GenerateKeyPair()
     {
-        using var key = Key.Create(KeyAgreementAlgorithm.X25519);
+        using var ecdh = ECDiffieHellman.Create(ECCurve.CreateFromValue("1.3.101.110")); // X25519
         return (
-            Convert.ToBase64String(key.Export(KeyBlobFormat.RawPrivateKey)),
-            Convert.ToBase64String(key.PublicKey.Export(KeyBlobFormat.RawPublicKey))
+            Convert.ToBase64String(ecdh.ExportRawPrivateKey()),
+            Convert.ToBase64String(ecdh.ExportRawPublicKey())
         );
     }
 
