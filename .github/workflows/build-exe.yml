@@ -2,7 +2,7 @@ name: Build Windows EXE
 
 on:
   push:
-    branches: [ claude/vpn-app-development-QVkcn, main ]
+    branches: [ claude/read-directory-czphL, main ]
   workflow_dispatch:
 
 jobs:
