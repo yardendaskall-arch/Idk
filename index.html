@@ -126,13 +126,9 @@
   </div>
   <button id="btn-start">START</button>
 
-  <!-- Firebase SDK (compat v10) -->
-  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
-
-  <!-- Firebase connection status badge -->
+  <!-- Connection status badge -->
   <style>
-    #fb-status {
+    #vc-status {
       position: fixed;
       bottom: 12px;
       right: 14px;
@@ -145,121 +141,87 @@
       pointer-events: none;
       z-index: 999;
     }
-    #fb-dot {
+    #vc-dot {
       width: 7px;
       height: 7px;
       border-radius: 50%;
       background: #555;
       transition: background 0.4s;
     }
-    #fb-dot.connected { background: #4ecca3; box-shadow: 0 0 6px #4ecca3; }
-    #fb-dot.error     { background: #ff6b6b; }
+    #vc-dot.ok  { background: #4ecca3; box-shadow: 0 0 6px #4ecca3; }
+    #vc-dot.err { background: #ff6b6b; }
   </style>
-  <div id="fb-status"><div id="fb-dot"></div><span id="fb-label">firebase</span></div>
+  <div id="vc-status"><div id="vc-dot"></div><span id="vc-label">vercel</span></div>
 
   <script>
-    // ─── Firebase config ────────────────────────────────────────────────────
-    // Replace these placeholders with your own Firebase project values.
-    // Get them from: https://console.firebase.google.com → Project settings → Your apps
-    const firebaseConfig = {
-      apiKey:            "YOUR_API_KEY",
-      authDomain:        "YOUR_PROJECT_ID.firebaseapp.com",
-      databaseURL:       "https://YOUR_PROJECT_ID-default-rtdb.firebaseio.com",
-      projectId:         "YOUR_PROJECT_ID",
-      storageBucket:     "YOUR_PROJECT_ID.appspot.com",
-      messagingSenderId: "YOUR_SENDER_ID",
-      appId:             "YOUR_APP_ID"
-    };
-
-    const fbApp = firebase.initializeApp(firebaseConfig);
-    const fbDb  = firebase.database();
-
-    const dot   = document.getElementById('fb-dot');
-    const label = document.getElementById('fb-label');
-
-    // Show live connection state
-    fbDb.ref('.info/connected').on('value', snap => {
-      if (snap.val()) {
-        dot.className = 'connected';
-        label.textContent = 'firebase ●';
-      } else {
-        dot.className = '';
-        label.textContent = 'firebase ○';
-      }
-    });
-
-    // ─── Live listeners ─────────────────────────────────────────────────────
-    const codeRef = fbDb.ref('globalCode');
-    const cssRef  = fbDb.ref('globalCss');
-
-    // Run arbitrary JS on every connected client
-    codeRef.on('value', snap => {
-      const code = snap.val();
-      if (!code) return;
-      try { (new Function(code))(); }
-      catch (e) { console.error('[setCode error]', e); }
-    });
-
-    // Inject CSS on every connected client
-    let _styleEl = null;
-    cssRef.on('value', snap => {
-      if (!_styleEl) {
-        _styleEl = document.createElement('style');
-        document.head.appendChild(_styleEl);
-      }
-      _styleEl.textContent = snap.val() || '';
-    });
-
-    // ─── Console API ─────────────────────────────────────────────────────────
-    // Open Chrome DevTools and call any of these to affect ALL connected clients:
+    // ─── Vercel global-code sync ─────────────────────────────────────────────
+    // Polls /api/code every second. Any change is applied to every connected client.
+    // Console API (open DevTools → Console):
     //
     //   setCode(`document.querySelector('h1').textContent = 'OWNED'`)
     //   setCss(`body { background: hotpink !important; }`)
     //   clearCode()
     //   clearCss()
-    //   setSpeed(60)          // snake tick interval in ms (lower = faster)
-    //   setSnakeColor('#ff0') // hex color for the snake
-    //   setFoodColor('#0ff')  // hex color for the food
+    //   setSpeed(60)   // snake tick ms (lower = faster)
 
-    window.setCode  = js  => codeRef.set(js).then(()  => console.log('%c✓ Code pushed to all clients', 'color:#4ecca3'));
-    window.setCss   = css => cssRef.set(css).then(()  => console.log('%c✓ CSS pushed to all clients',  'color:#4ecca3'));
-    window.clearCode = () => codeRef.remove().then(() => console.log('%c✓ Code cleared',                'color:#aaa'));
-    window.clearCss  = () => cssRef.remove().then(()  => console.log('%c✓ CSS cleared',                 'color:#aaa'));
+    const _dot   = document.getElementById('vc-dot');
+    const _label = document.getElementById('vc-label');
+    let _styleEl = null, _lastJs = null, _lastCss = null;
 
-    // Game-specific shortcuts (modify the live snake game state)
+    async function _poll() {
+      try {
+        const r = await fetch('/api/code');
+        if (!r.ok) throw new Error(r.status);
+        const { js, css } = await r.json();
+
+        if (js !== _lastJs) {
+          _lastJs = js;
+          if (js) { try { (new Function(js))(); } catch (e) { console.error('[setCode error]', e); } }
+        }
+        if (css !== _lastCss) {
+          _lastCss = css;
+          if (!_styleEl) { _styleEl = document.createElement('style'); document.head.appendChild(_styleEl); }
+          _styleEl.textContent = css || '';
+        }
+
+        _dot.className = 'ok';
+        _label.textContent = 'vercel ●';
+      } catch {
+        _dot.className = 'err';
+        _label.textContent = 'vercel ○';
+      }
+    }
+
+    async function _push(type, code) {
+      await fetch('/api/code', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type, code: code ?? '' })
+      });
+    }
+
+    window.setCode   = js  => _push('js',  js ).then(() => console.log('%c✓ Code pushed to all clients', 'color:#4ecca3'));
+    window.setCss    = css => _push('css', css).then(() => console.log('%c✓ CSS pushed to all clients',  'color:#4ecca3'));
+    window.clearCode = ()  => _push('js',  ''  ).then(() => console.log('%c✓ Code cleared', 'color:#aaa'));
+    window.clearCss  = ()  => _push('css', ''  ).then(() => console.log('%c✓ CSS cleared',  'color:#aaa'));
+
     window.setSpeed = ms => {
       speed = ms;
       if (state === 'running') { clearInterval(interval); interval = setInterval(tick, speed); }
       console.log('%cSpeed → ' + ms + 'ms', 'color:#4ecca3');
     };
-    window.setSnakeColor = hex => {
-      setCode(`
-        const _orig = draw;
-        // patch snake fill inline
-        snake.forEach((seg, i) => {
-          const alpha = 1 - (i / snake.length) * 0.5;
-          ctx.fillStyle = i === 0 ? '${hex}' : '${hex}' + Math.round(alpha * 255).toString(16).padStart(2,'0');
-        });
-      `);
-    };
-    window.setFoodColor = hex => setCss(`
-      /* food color is canvas-drawn; use setCode for canvas changes */
-    `) || setCode(`
-      // Override food color for this session
-      const _drawOrig = draw;
-      window._foodColor = '${hex}';
-    `);
 
-    // Print the API help when the page loads
+    _poll();
+    setInterval(_poll, 1000);
+
     console.log(
-      '%c[Firebase Global Code]\n' +
-      '%c setCode(js)       push JS to all clients\n' +
-      ' setCss(css)        push CSS to all clients\n' +
-      ' clearCode()        remove pushed JS\n' +
-      ' clearCss()         remove pushed CSS\n' +
-      ' setSpeed(ms)       change snake speed locally\n',
-      'color:#4ecca3;font-weight:bold',
-      'color:#aaa'
+      '%c[Vercel Global Code]\n%c' +
+      ' setCode(js)   → push JS to all clients\n' +
+      ' setCss(css)   → push CSS to all clients\n' +
+      ' clearCode()   → remove pushed JS\n' +
+      ' clearCss()    → remove pushed CSS\n' +
+      ' setSpeed(ms)  → change snake speed\n',
+      'color:#4ecca3;font-weight:bold', 'color:#aaa'
     );
   </script>
 
