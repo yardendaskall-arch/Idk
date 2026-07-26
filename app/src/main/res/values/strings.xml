@@ -1,0 +1,34 @@
+<resources>
+    <string name="app_name">Micro-Dose Discipline</string>
+    <string name="widget_label">Micro-Dose Gate</string>
+
+    <string name="onboarding_title">Micro-Dose Discipline</string>
+    <string name="onboarding_subtitle">Earn 1 minute of fun with 10 seconds of health.</string>
+
+    <string name="perm_overlay_title">Draw over other apps</string>
+    <string name="perm_overlay_desc">Required to show the hard-lock screen over TikTok/YouTube when your minute is up.</string>
+    <string name="perm_usage_title">Usage access</string>
+    <string name="perm_usage_desc">Required to detect which app is in the foreground so the 60 second timer is accurate.</string>
+    <string name="perm_accessibility_title">Accessibility service</string>
+    <string name="perm_accessibility_desc">Required to forcefully block blacklisted apps the instant your reward minute expires.</string>
+    <string name="perm_notifications_title">Notifications</string>
+    <string name="perm_notifications_desc">Required to show the countdown while your reward minute is running.</string>
+    <string name="perm_grant">Grant</string>
+    <string name="perm_granted">Granted</string>
+
+    <string name="target_apps_title">Blacklisted / reward apps</string>
+    <string name="add_widget_hint">Long-press your home screen and add the \"Micro-Dose Gate\" widget to start.</string>
+
+    <string name="notif_channel_lock">Reward Lock Timer</string>
+    <string name="notif_lock_title">Reward minute running</string>
+    <string name="notif_lock_text">%1$d seconds left before lock-out</string>
+    <string name="notif_block_title">Time\'s up</string>
+    <string name="notif_block_text">Locked until your next micro-dose task.</string>
+
+    <string name="widget_start_task">Start 10s Task</string>
+    <string name="widget_tap_to_confirm">Tap to Checkoff</string>
+    <string name="widget_tap_again">Tap Again to Confirm</string>
+    <string name="widget_locked">Locked</string>
+    <string name="widget_reward_active">Reward unlocked — tap an app</string>
+    <string name="widget_in_session">Enjoy your minute. Locks automatically.</string>
+</resources>
