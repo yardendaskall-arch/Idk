@@ -1,16 +1,18 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="com.sheintrain"
-    android:versionCode="1"
-    android:versionName="1.0">
+    android:versionCode="2"
+    android:versionName="2.0">
 
     <uses-sdk android:minSdkVersion="21" android:targetSdkVersion="34"/>
 
     <uses-permission android:name="android.permission.VIBRATE"/>
+    <uses-permission android:name="android.permission.INTERNET"/>
 
     <application
         android:label="Shein Train"
-        android:allowBackup="false">
+        android:allowBackup="false"
+        android:usesCleartextTraffic="false">
 
         <activity
             android:name=".MainActivity"
@@ -21,6 +23,9 @@
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
         </activity>
+
+        <activity android:name=".SuggestionActivity" android:screenOrientation="portrait"/>
+        <activity android:name=".AdminActivity" android:screenOrientation="portrait"/>
 
     </application>
 
