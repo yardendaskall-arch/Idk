@@ -1,0 +1,123 @@
+package com.yarden.universalremote.protocol
+
+import android.util.Base64
+import com.yarden.universalremote.discovery.DiscoveredDevice
+import kotlinx.coroutines.suspendCancellableCoroutine
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.WebSocket
+import okhttp3.WebSocketListener
+import org.json.JSONObject
+import java.util.concurrent.TimeUnit
+import kotlin.coroutines.resume
+
+/**
+ * Samsung Tizen "Remote Control" WebSocket API, used by all Samsung Smart TVs since ~2016.
+ * The first connection makes the TV show an on-screen "Allow this app to connect?" prompt;
+ * the user needs to accept it there once. Samsung's newer TVs also expose the same API over
+ * TLS on port 8002, but plain 8001 still works on the large majority of network configurations.
+ */
+class SamsungProtocol(override val device: DiscoveredDevice) : TvProtocol {
+
+    private val client = OkHttpClient.Builder()
+        .connectTimeout(3, TimeUnit.SECONDS)
+        .readTimeout(0, TimeUnit.MILLISECONDS) // long-lived socket
+        .build()
+
+    private var socket: WebSocket? = null
+
+    override suspend fun connect(pairing: PairingCallback): ConnectResult = suspendCancellableCoroutine { cont ->
+        val appName = Base64.encodeToString("UniversalRemote".toByteArray(), Base64.NO_WRAP)
+        val url = "ws://${device.ip}:${device.port}/api/v2/channels/samsung.remote.control?name=$appName"
+        val request = Request.Builder().url(url).build()
+
+        var resumed = false
+        val ws = client.newWebSocket(request, object : WebSocketListener() {
+            override fun onMessage(webSocket: WebSocket, text: String) {
+                if (resumed) return
+                try {
+                    val json = JSONObject(text)
+                    when (json.optString("event")) {
+                        "ms.channel.connect" -> {
+                            resumed = true
+                            cont.resume(ConnectResult.Success)
+                        }
+                        "ms.channel.unauthorized" -> {
+                            resumed = true
+                            cont.resume(ConnectResult.Failed("Connection was denied on the TV"))
+                        }
+                    }
+                } catch (_: Exception) {
+                }
+            }
+
+            override fun onFailure(webSocket: WebSocket, t: Throwable, response: okhttp3.Response?) {
+                if (!resumed) {
+                    resumed = true
+                    cont.resume(ConnectResult.Failed(t.message ?: "Could not reach the Samsung TV"))
+                }
+            }
+
+            override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
+                if (!resumed) {
+                    resumed = true
+                    cont.resume(ConnectResult.Failed("Connection closed before pairing completed"))
+                }
+            }
+        })
+        socket = ws
+        pairing.showMessage("If your Samsung TV shows an 'Allow connection?' popup, select Allow.")
+
+        cont.invokeOnCancellation { ws.cancel() }
+    }
+
+    override fun disconnect() {
+        socket?.close(1000, "bye")
+        socket = null
+    }
+
+    override fun sendKey(key: RemoteKey) {
+        val keyCode = mapKey(key) ?: return
+        val payload = JSONObject().apply {
+            put("method", "ms.remote.control")
+            put("params", JSONObject().apply {
+                put("Cmd", "Click")
+                put("DataOfCmd", keyCode)
+                put("Option", "false")
+                put("TypeOfRemote", "SendRemoteKey")
+            })
+        }
+        socket?.send(payload.toString())
+    }
+
+    private fun mapKey(key: RemoteKey): String? = when (key) {
+        RemoteKey.POWER -> "KEY_POWER"
+        RemoteKey.VOLUME_UP -> "KEY_VOLUP"
+        RemoteKey.VOLUME_DOWN -> "KEY_VOLDOWN"
+        RemoteKey.MUTE -> "KEY_MUTE"
+        RemoteKey.CHANNEL_UP -> "KEY_CHUP"
+        RemoteKey.CHANNEL_DOWN -> "KEY_CHDOWN"
+        RemoteKey.DPAD_UP -> "KEY_UP"
+        RemoteKey.DPAD_DOWN -> "KEY_DOWN"
+        RemoteKey.DPAD_LEFT -> "KEY_LEFT"
+        RemoteKey.DPAD_RIGHT -> "KEY_RIGHT"
+        RemoteKey.DPAD_SELECT -> "KEY_ENTER"
+        RemoteKey.BACK -> "KEY_RETURN"
+        RemoteKey.HOME -> "KEY_HOME"
+        RemoteKey.MENU -> "KEY_MENU"
+        RemoteKey.INPUT_SOURCE -> "KEY_SOURCE"
+        RemoteKey.PLAY_PAUSE -> "KEY_PLAY"
+        RemoteKey.REWIND -> "KEY_REWIND"
+        RemoteKey.FAST_FORWARD -> "KEY_FF"
+        RemoteKey.NUM_0 -> "KEY_0"
+        RemoteKey.NUM_1 -> "KEY_1"
+        RemoteKey.NUM_2 -> "KEY_2"
+        RemoteKey.NUM_3 -> "KEY_3"
+        RemoteKey.NUM_4 -> "KEY_4"
+        RemoteKey.NUM_5 -> "KEY_5"
+        RemoteKey.NUM_6 -> "KEY_6"
+        RemoteKey.NUM_7 -> "KEY_7"
+        RemoteKey.NUM_8 -> "KEY_8"
+        RemoteKey.NUM_9 -> "KEY_9"
+    }
+}

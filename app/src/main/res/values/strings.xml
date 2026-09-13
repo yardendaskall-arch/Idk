@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Universal TV Remote</string>
+    <string name="scan_title">Universal TV Remote</string>
+    <string name="scan_subtitle">Finds TVs on your WiFi network</string>
+    <string name="scan_button">Scan again</string>
+    <string name="empty_state">No TVs found yet.\nMake sure your TV is powered on and connected to this same WiFi network.</string>
+    <string name="connecting">Connecting…</string>
+    <string name="connected">Connected</string>
+    <string name="connection_failed">Couldn\'t connect: %1$s</string>
+    <string name="pairing_required">Pairing required</string>
+    <string name="ok">OK</string>
+    <string name="cancel">Cancel</string>
+</resources>

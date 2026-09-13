@@ -1,0 +1,268 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/background"
+    android:fillViewport="true">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="20dp">
+
+        <TextView
+            android:id="@+id/title"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center"
+            android:textColor="@color/on_background"
+            android:textSize="20sp"
+            android:textStyle="bold"
+            tools:text="Living Room TV" />
+
+        <TextView
+            android:id="@+id/subtitle"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center"
+            android:textColor="@color/on_surface_muted"
+            android:textSize="13sp"
+            tools:text="Samsung (Tizen) · 192.168.1.42" />
+
+        <TextView
+            android:id="@+id/statusText"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:gravity="center"
+            android:textColor="@color/accent"
+            android:textSize="13sp"
+            android:textStyle="bold"
+            tools:text="Connected" />
+
+        <!-- Power -->
+        <FrameLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="20dp">
+            <Button
+                android:id="@+id/btnPower"
+                android:layout_width="72dp"
+                android:layout_height="72dp"
+                android:layout_gravity="center"
+                android:background="@drawable/bg_power_button"
+                android:minWidth="0dp"
+                android:minHeight="0dp"
+                android:stateListAnimator="@null"
+                android:text="⏻"
+                android:textColor="@android:color/white"
+                android:textSize="22sp" />
+        </FrameLayout>
+
+        <!-- Volume / Channel -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="20dp"
+            android:orientation="horizontal">
+
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:layout_marginEnd="8dp"
+                android:orientation="vertical">
+
+                <Button
+                    android:id="@+id/btnVolUp"
+                    style="@style/RemoteButton.Pill"
+                    android:text="VOL +" />
+
+                <Button
+                    android:id="@+id/btnMute"
+                    style="@style/RemoteButton.Pill"
+                    android:layout_marginTop="8dp"
+                    android:text="MUTE" />
+
+                <Button
+                    android:id="@+id/btnVolDown"
+                    style="@style/RemoteButton.Pill"
+                    android:layout_marginTop="8dp"
+                    android:text="VOL −" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:layout_marginStart="8dp"
+                android:orientation="vertical">
+
+                <Button
+                    android:id="@+id/btnChUp"
+                    style="@style/RemoteButton.Pill"
+                    android:text="CH +" />
+
+                <Button
+                    android:id="@+id/btnInput"
+                    style="@style/RemoteButton.Pill"
+                    android:layout_marginTop="8dp"
+                    android:text="INPUT" />
+
+                <Button
+                    android:id="@+id/btnChDown"
+                    style="@style/RemoteButton.Pill"
+                    android:layout_marginTop="8dp"
+                    android:text="CH −" />
+            </LinearLayout>
+        </LinearLayout>
+
+        <!-- D-pad -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="20dp"
+            android:gravity="center"
+            android:orientation="vertical">
+
+            <Button
+                android:id="@+id/btnDpadUp"
+                style="@style/RemoteButton.Round"
+                android:text="▲" />
+
+            <LinearLayout
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:gravity="center"
+                android:orientation="horizontal">
+
+                <Button
+                    android:id="@+id/btnDpadLeft"
+                    style="@style/RemoteButton.Round"
+                    android:text="◀" />
+
+                <Button
+                    android:id="@+id/btnDpadOk"
+                    style="@style/RemoteButton.Round"
+                    android:layout_marginHorizontal="8dp"
+                    android:text="OK" />
+
+                <Button
+                    android:id="@+id/btnDpadRight"
+                    style="@style/RemoteButton.Round"
+                    android:text="▶" />
+            </LinearLayout>
+
+            <Button
+                android:id="@+id/btnDpadDown"
+                style="@style/RemoteButton.Round"
+                android:layout_marginTop="8dp"
+                android:text="▼" />
+        </LinearLayout>
+
+        <!-- Navigation -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="20dp"
+            android:orientation="horizontal">
+
+            <Button
+                android:id="@+id/btnBack"
+                style="@style/RemoteButton.PillWeighted"
+                android:layout_marginEnd="8dp"
+                android:text="BACK" />
+
+            <Button
+                android:id="@+id/btnHome"
+                style="@style/RemoteButton.PillWeighted"
+                android:layout_marginEnd="8dp"
+                android:text="HOME" />
+
+            <Button
+                android:id="@+id/btnMenu"
+                style="@style/RemoteButton.PillWeighted"
+                android:text="MENU" />
+        </LinearLayout>
+
+        <!-- Media -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:orientation="horizontal">
+
+            <Button
+                android:id="@+id/btnRewind"
+                style="@style/RemoteButton.PillWeighted"
+                android:layout_marginEnd="8dp"
+                android:text="⏪" />
+
+            <Button
+                android:id="@+id/btnPlayPause"
+                style="@style/RemoteButton.PillWeighted"
+                android:layout_marginEnd="8dp"
+                android:text="⏯" />
+
+            <Button
+                android:id="@+id/btnFastForward"
+                style="@style/RemoteButton.PillWeighted"
+                android:text="⏩" />
+        </LinearLayout>
+
+        <!-- Number pad -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="20dp"
+            android:orientation="vertical">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal">
+                <Button android:id="@+id/btnNum1" style="@style/RemoteButton.PillWeighted" android:layout_marginEnd="8dp" android:text="1" />
+                <Button android:id="@+id/btnNum2" style="@style/RemoteButton.PillWeighted" android:layout_marginEnd="8dp" android:text="2" />
+                <Button android:id="@+id/btnNum3" style="@style/RemoteButton.PillWeighted" android:text="3" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:orientation="horizontal">
+                <Button android:id="@+id/btnNum4" style="@style/RemoteButton.PillWeighted" android:layout_marginEnd="8dp" android:text="4" />
+                <Button android:id="@+id/btnNum5" style="@style/RemoteButton.PillWeighted" android:layout_marginEnd="8dp" android:text="5" />
+                <Button android:id="@+id/btnNum6" style="@style/RemoteButton.PillWeighted" android:text="6" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:orientation="horizontal">
+                <Button android:id="@+id/btnNum7" style="@style/RemoteButton.PillWeighted" android:layout_marginEnd="8dp" android:text="7" />
+                <Button android:id="@+id/btnNum8" style="@style/RemoteButton.PillWeighted" android:layout_marginEnd="8dp" android:text="8" />
+                <Button android:id="@+id/btnNum9" style="@style/RemoteButton.PillWeighted" android:text="9" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:orientation="horizontal">
+                <View android:layout_width="0dp" android:layout_height="1dp" android:layout_weight="1" />
+                <Button
+                    android:id="@+id/btnNum0"
+                    style="@style/RemoteButton.PillWeighted"
+                    android:layout_marginHorizontal="8dp"
+                    android:text="0" />
+                <View android:layout_width="0dp" android:layout_height="1dp" android:layout_weight="1" />
+            </LinearLayout>
+        </LinearLayout>
+
+    </LinearLayout>
+</ScrollView>
