@@ -2,7 +2,6 @@ package com.yarden.universalremote.discovery
 
 import android.content.Context
 import android.net.ConnectivityManager
-import android.net.LinkAddress
 import android.net.wifi.WifiManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.awaitClose
@@ -176,7 +175,7 @@ class NetworkScanner(private val context: Context) {
 
     private fun localSubnetHosts(): List<String> {
         val addr = findIPv4LinkAddress() ?: return emptyList()
-        val base = addr.address.address // 4 bytes
+        val base = addr.address // 4 bytes
         val prefix = addr.prefixLength.coerceAtLeast(24) // never scan more than a /24 worth of hosts
         val hostBits = 32 - prefix
         val hostCount = (1 shl hostBits).coerceAtMost(254)
@@ -197,23 +196,28 @@ class NetworkScanner(private val context: Context) {
         return result
     }
 
-    private fun findIPv4LinkAddress(): LinkAddress? {
+    /** Just enough of android.net.LinkAddress to compute a subnet -- its own constructor isn't public API. */
+    private data class IpPrefix(val address: ByteArray, val prefixLength: Int)
+
+    private fun findIPv4LinkAddress(): IpPrefix? {
         return try {
             val cm = context.applicationContext.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
             val network = cm.activeNetwork ?: return fallbackLinkAddress()
             val props = cm.getLinkProperties(network) ?: return fallbackLinkAddress()
-            props.linkAddresses.firstOrNull { it.address is Inet4Address } ?: fallbackLinkAddress()
+            props.linkAddresses.firstOrNull { it.address is Inet4Address }
+                ?.let { IpPrefix(it.address.address, it.prefixLength) }
+                ?: fallbackLinkAddress()
         } catch (_: Exception) {
             fallbackLinkAddress()
         }
     }
 
-    private fun fallbackLinkAddress(): LinkAddress? {
+    private fun fallbackLinkAddress(): IpPrefix? {
         return try {
             NetworkInterface.getNetworkInterfaces().asSequence()
                 .flatMap { it.interfaceAddresses.asSequence() }
                 .firstOrNull { it.address is Inet4Address && !it.address.isLoopbackAddress }
-                ?.let { LinkAddress(it.address, it.networkPrefixLength.toInt()) }
+                ?.let { IpPrefix(it.address.address, it.networkPrefixLength.toInt()) }
         } catch (_: Exception) {
             null
         }
