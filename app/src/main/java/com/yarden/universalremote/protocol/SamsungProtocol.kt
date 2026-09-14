@@ -8,27 +8,40 @@ import okhttp3.Request
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
 import org.json.JSONObject
+import java.security.SecureRandom
+import java.security.cert.X509Certificate
 import java.util.concurrent.TimeUnit
+import javax.net.ssl.HostnameVerifier
+import javax.net.ssl.SSLContext
+import javax.net.ssl.X509TrustManager
 import kotlin.coroutines.resume
 
 /**
  * Samsung Tizen "Remote Control" WebSocket API, used by all Samsung Smart TVs since ~2016.
  * The first connection makes the TV show an on-screen "Allow this app to connect?" prompt;
- * the user needs to accept it there once. Samsung's newer TVs also expose the same API over
- * TLS on port 8002, but plain 8001 still works on the large majority of network configurations.
+ * the user needs to accept it there once. Older/most models use plain WS on port 8001; several
+ * newer models only accept the TLS variant on 8002 (self-signed cert, same reasoning as Vizio's
+ * trust-all client -- there's no CA to validate a TV's own LAN-only IP against).
  */
 class SamsungProtocol(override val device: DiscoveredDevice) : TvProtocol {
 
     private val client = OkHttpClient.Builder()
         .connectTimeout(3, TimeUnit.SECONDS)
         .readTimeout(0, TimeUnit.MILLISECONDS) // long-lived socket
+        .apply {
+            if (device.port == 8002) {
+                sslSocketFactory(trustAllSslSocketFactory(), trustAllManager())
+                hostnameVerifier(HostnameVerifier { _, _ -> true })
+            }
+        }
         .build()
 
     private var socket: WebSocket? = null
 
     override suspend fun connect(pairing: PairingCallback): ConnectResult = suspendCancellableCoroutine { cont ->
         val appName = Base64.encodeToString("UniversalRemote".toByteArray(), Base64.NO_WRAP)
-        val url = "ws://${device.ip}:${device.port}/api/v2/channels/samsung.remote.control?name=$appName"
+        val scheme = if (device.port == 8002) "wss" else "ws"
+        val url = "$scheme://${device.ip}:${device.port}/api/v2/channels/samsung.remote.control?name=$appName"
         val request = Request.Builder().url(url).build()
 
         var resumed = false
@@ -120,4 +133,14 @@ class SamsungProtocol(override val device: DiscoveredDevice) : TvProtocol {
         RemoteKey.NUM_8 -> "KEY_8"
         RemoteKey.NUM_9 -> "KEY_9"
     }
+
+    private fun trustAllManager(): X509TrustManager = object : X509TrustManager {
+        override fun checkClientTrusted(chain: Array<out X509Certificate>?, authType: String?) = Unit
+        override fun checkServerTrusted(chain: Array<out X509Certificate>?, authType: String?) = Unit
+        override fun getAcceptedIssuers(): Array<X509Certificate> = arrayOf()
+    }
+
+    private fun trustAllSslSocketFactory() = SSLContext.getInstance("TLS").apply {
+        init(null, arrayOf(trustAllManager()), SecureRandom())
+    }.socketFactory
 }

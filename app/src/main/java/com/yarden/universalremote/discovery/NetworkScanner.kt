@@ -246,6 +246,11 @@ class NetworkScanner(private val context: Context) {
         if (isPortOpen(ip, 8001) && looksLikeSamsung(ip)) {
             return DiscoveredDevice(ip, "Samsung TV", TvBrand.SAMSUNG, 8001)
         }
+        // Newer Samsung models only accept the TLS remote-control port; a plain closed 8001
+        // with 8002 open on the same host is a strong enough signal on a home LAN.
+        if (!isPortOpen(ip, 8001) && isPortOpen(ip, 8002)) {
+            return DiscoveredDevice(ip, "Samsung TV", TvBrand.SAMSUNG, 8002)
+        }
         if (isPortOpen(ip, 3000)) {
             return DiscoveredDevice(ip, "LG TV (webOS)", TvBrand.LG_WEBOS, 3000)
         }
