@@ -6,6 +6,7 @@ import android.net.NetworkCapabilities
 import android.net.wifi.WifiManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.awaitClose
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.flowOn
@@ -27,6 +28,7 @@ import java.net.InetSocketAddress
 import java.net.NetworkInterface
 import java.net.Socket
 import java.util.concurrent.TimeUnit
+import kotlin.random.Random
 
 /**
  * Finds smart TVs reachable on the phone's current WiFi subnet.
@@ -67,11 +69,16 @@ class NetworkScanner(private val context: Context) {
         }
 
         val hosts = localSubnetHosts()
-        val semaphore = Semaphore(64)
+        // Kept deliberately modest: hammering every host on the subnet with dozens of
+        // simultaneous connections looks exactly like a port scan to router-level security
+        // features (mesh systems, ISP boxes with "IoT protection", etc.), which can start
+        // silently dropping the phone's traffic -- including to the TV it just found.
+        val semaphore = Semaphore(12)
         scope.launch {
             val jobs = hosts.map { ip ->
                 launch {
                     semaphore.withPermit {
+                        delay(Random.nextLong(0, 120)) // jitter so probes aren't a synchronized burst
                         probeHost(ip)?.let { emitOnce(it) }
                     }
                 }
@@ -240,15 +247,15 @@ class NetworkScanner(private val context: Context) {
     // ---------------------------------------------------------------------
 
     private fun probeHost(ip: String): DiscoveredDevice? {
-        if (isPortOpen(ip, 8060) && looksLikeRoku(ip)) {
+        if (looksLikeRoku(ip)) {
             return DiscoveredDevice(ip, "Roku TV", TvBrand.ROKU, 8060)
         }
-        if (isPortOpen(ip, 8001) && looksLikeSamsung(ip)) {
+        if (looksLikeSamsung(ip)) {
             return DiscoveredDevice(ip, "Samsung TV", TvBrand.SAMSUNG, 8001)
         }
         // Newer Samsung models only accept the TLS remote-control port; a plain closed 8001
         // with 8002 open on the same host is a strong enough signal on a home LAN.
-        if (!isPortOpen(ip, 8001) && isPortOpen(ip, 8002)) {
+        if (isPortOpen(ip, 8002)) {
             return DiscoveredDevice(ip, "Samsung TV", TvBrand.SAMSUNG, 8002)
         }
         if (isPortOpen(ip, 3000)) {
