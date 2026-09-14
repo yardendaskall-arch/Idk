@@ -5,6 +5,9 @@ on:
     branches: ["**"]
   workflow_dispatch: {}
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -31,3 +34,15 @@ jobs:
         with:
           name: universal-tv-remote-debug-apk
           path: app/build/outputs/apk/debug/app-debug.apk
+
+      - name: Publish APK to apk-releases branch
+        run: |
+          cp app/build/outputs/apk/debug/app-debug.apk /tmp/universal-tv-remote-debug.apk
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout --orphan apk-releases
+          git rm -rf . > /dev/null 2>&1 || true
+          cp /tmp/universal-tv-remote-debug.apk universal-tv-remote-debug.apk
+          git add universal-tv-remote-debug.apk
+          git commit -m "Build APK from ${GITHUB_SHA}"
+          git push --force origin HEAD:apk-releases
