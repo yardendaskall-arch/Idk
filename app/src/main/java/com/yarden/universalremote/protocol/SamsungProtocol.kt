@@ -19,70 +19,81 @@ import kotlin.coroutines.resume
 /**
  * Samsung Tizen "Remote Control" WebSocket API, used by all Samsung Smart TVs since ~2016.
  * The first connection makes the TV show an on-screen "Allow this app to connect?" prompt;
- * the user needs to accept it there once. Older/most models use plain WS on port 8001; several
- * newer models only accept the TLS variant on 8002 (self-signed cert, same reasoning as Vizio's
- * trust-all client -- there's no CA to validate a TV's own LAN-only IP against).
+ * the user needs to accept it there once. Which of the two ports actually answers (plain
+ * WS on 8001, or TLS on 8002) varies by model and can even be flaky moment to moment on the
+ * same TV, so this tries the port discovery found first and falls back to the other one
+ * rather than failing outright. The TLS trust-all config is inert for plain ws:// connections,
+ * so one client handles both -- there's no real CA to validate a TV's own LAN-only IP against
+ * anyway, same reasoning as VizioProtocol's.
  */
 class SamsungProtocol(override val device: DiscoveredDevice) : TvProtocol {
 
     private val client = OkHttpClient.Builder()
-        .connectTimeout(3, TimeUnit.SECONDS)
+        .connectTimeout(4, TimeUnit.SECONDS)
         .readTimeout(0, TimeUnit.MILLISECONDS) // long-lived socket
-        .apply {
-            if (device.port == 8002) {
-                sslSocketFactory(trustAllSslSocketFactory(), trustAllManager())
-                hostnameVerifier(HostnameVerifier { _, _ -> true })
-            }
-        }
+        .sslSocketFactory(trustAllSslSocketFactory(), trustAllManager())
+        .hostnameVerifier(HostnameVerifier { _, _ -> true })
         .build()
 
     private var socket: WebSocket? = null
 
-    override suspend fun connect(pairing: PairingCallback): ConnectResult = suspendCancellableCoroutine { cont ->
-        val appName = Base64.encodeToString("UniversalRemote".toByteArray(), Base64.NO_WRAP)
-        val scheme = if (device.port == 8002) "wss" else "ws"
-        val url = "$scheme://${device.ip}:${device.port}/api/v2/channels/samsung.remote.control?name=$appName"
-        val request = Request.Builder().url(url).build()
+    override suspend fun connect(pairing: PairingCallback): ConnectResult {
+        val primaryPort = device.port
+        val fallbackPort = if (primaryPort == 8002) 8001 else 8002
 
-        var resumed = false
-        val ws = client.newWebSocket(request, object : WebSocketListener() {
-            override fun onMessage(webSocket: WebSocket, text: String) {
-                if (resumed) return
-                try {
-                    val json = JSONObject(text)
-                    when (json.optString("event")) {
-                        "ms.channel.connect" -> {
-                            resumed = true
-                            cont.resume(ConnectResult.Success)
-                        }
-                        "ms.channel.unauthorized" -> {
-                            resumed = true
-                            cont.resume(ConnectResult.Failed("Connection was denied on the TV"))
-                        }
-                    }
-                } catch (_: Exception) {
-                }
-            }
+        val first = attemptConnect(primaryPort, pairing)
+        if (first is ConnectResult.Success) return first
 
-            override fun onFailure(webSocket: WebSocket, t: Throwable, response: okhttp3.Response?) {
-                if (!resumed) {
-                    resumed = true
-                    cont.resume(ConnectResult.Failed(t.message ?: "Could not reach the Samsung TV"))
-                }
-            }
-
-            override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
-                if (!resumed) {
-                    resumed = true
-                    cont.resume(ConnectResult.Failed("Connection closed before pairing completed"))
-                }
-            }
-        })
-        socket = ws
-        pairing.showMessage("If your Samsung TV shows an 'Allow connection?' popup, select Allow.")
-
-        cont.invokeOnCancellation { ws.cancel() }
+        val second = attemptConnect(fallbackPort, pairing)
+        return if (second is ConnectResult.Success) second else first
     }
+
+    private suspend fun attemptConnect(port: Int, pairing: PairingCallback): ConnectResult =
+        suspendCancellableCoroutine { cont ->
+            val appName = Base64.encodeToString("UniversalRemote".toByteArray(), Base64.NO_WRAP)
+            val scheme = if (port == 8002) "wss" else "ws"
+            val url = "$scheme://${device.ip}:$port/api/v2/channels/samsung.remote.control?name=$appName"
+            val request = Request.Builder().url(url).build()
+
+            var resumed = false
+            val ws = client.newWebSocket(request, object : WebSocketListener() {
+                override fun onMessage(webSocket: WebSocket, text: String) {
+                    if (resumed) return
+                    try {
+                        val json = JSONObject(text)
+                        when (json.optString("event")) {
+                            "ms.channel.connect" -> {
+                                resumed = true
+                                socket = webSocket
+                                cont.resume(ConnectResult.Success)
+                            }
+                            "ms.channel.unauthorized" -> {
+                                resumed = true
+                                cont.resume(ConnectResult.Failed("Connection was denied on the TV"))
+                            }
+                        }
+                    } catch (_: Exception) {
+                    }
+                }
+
+                override fun onFailure(webSocket: WebSocket, t: Throwable, response: okhttp3.Response?) {
+                    if (!resumed) {
+                        resumed = true
+                        cont.resume(ConnectResult.Failed(t.message ?: "Could not reach the Samsung TV"))
+                    }
+                }
+
+                override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
+                    if (!resumed) {
+                        resumed = true
+                        cont.resume(ConnectResult.Failed("Connection closed before pairing completed"))
+                    }
+                }
+            })
+            pairing.showMessage("If your Samsung TV shows an 'Allow connection?' popup, select Allow.")
+
+            cont.invokeOnCancellation { ws.cancel() }
+        }
 
     override fun disconnect() {
         socket?.close(1000, "bye")
