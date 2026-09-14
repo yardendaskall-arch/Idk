@@ -2,6 +2,7 @@ package com.yarden.universalremote.discovery
 
 import android.content.Context
 import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.net.wifi.WifiManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.awaitClose
@@ -202,7 +203,14 @@ class NetworkScanner(private val context: Context) {
     private fun findIPv4LinkAddress(): IpPrefix? {
         return try {
             val cm = context.applicationContext.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
-            val network = cm.activeNetwork ?: return fallbackLinkAddress()
+            // cm.activeNetwork is often the phone's cellular connection even while WiFi is
+            // connected (e.g. WiFi has no validated internet access), which would make every
+            // computation below scan the carrier's network instead of the TV's LAN. Look for
+            // the WiFi-transport network explicitly instead of trusting "active".
+            val wifiNetwork = cm.allNetworks.firstOrNull { network ->
+                cm.getNetworkCapabilities(network)?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true
+            }
+            val network = wifiNetwork ?: cm.activeNetwork ?: return fallbackLinkAddress()
             val props = cm.getLinkProperties(network) ?: return fallbackLinkAddress()
             props.linkAddresses.firstOrNull { it.address is Inet4Address }
                 ?.let { IpPrefix(it.address.address, it.prefixLength) }
