@@ -1,0 +1,4 @@
+fafbseg>=3.0
+navis>=1.5
+networkx
+pandas
