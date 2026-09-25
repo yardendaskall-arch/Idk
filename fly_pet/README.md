@@ -54,27 +54,26 @@ every one of their output synapses.
   when you quit, and reloaded at start. Time spent closed counts as time to
   forget.
 
-The "See what he sees and thinks" window shows the current strengths ("1.00x" is untouched, below 1
+The "What he's doing" window shows the current strengths ("1.00x" is untouched, below 1
 means he's getting used to you, above 1 means he's wary). Delete
 `brain_data/memory.npz` to give him a fresh start.
 
-Left-click to swat him. Right-click the fly and choose **See what he sees and
-thinks** to open a live window with:
+Left-click to swat him. Right-click the fly to open any of three live
+windows (or **Open all three**):
 
-* **What he sees**: his panoramic field of view (left eye, right eye, the
-  overlap in front, and the blind spot behind him), with your cursor drawn
-  where and how big he sees it. It turns red when it's rushing at him. A
-  sentence underneath describes it, e.g. "A small object is moving, 18° to
-  his left".
-* **What his brain is doing**: all 138,639 neurons drawn at their real
-  positions in his brain, viewed from behind his head. Each one lights up
-  when it fires, so you can watch activity spread from his optic lobes
-  into the central brain.
-* **His current action in words**, read from his command neurons, e.g.
-  "He's turning left (DNa02)" or "Escape! His Giant Fiber is firing".
-* Firing rates of his visual and command neurons, and his memory.
+* **What he sees**: his field of view all the way around him (left eye,
+  right eye, the overlap in front, and the blind spot behind), with your
+  cursor drawn where and how big he sees it. It turns red when it rushes at
+  him. Below are a sentence describing it, e.g. "A small object is moving,
+  18° to his left", and the firing of his visual neurons for each eye.
+* **His brain**: all 138,639 neurons drawn at their real positions, viewed
+  from behind his head. Each one lights up when it fires, so you can watch
+  activity spread from his optic lobes into the central brain.
+* **What he's doing**: his current action in words, read from his command
+  neurons (e.g. "He's turning left (DNa02)" or "Escape! His Giant Fiber is
+  firing"), the firing of each command neuron, and his memory.
 
-Choose **Quit** to close the pet.
+Click a menu item again, or close the window, to hide it. Choose **Quit** to close the pet.
 
 ### Honest limitations
 
@@ -105,8 +104,8 @@ connectome data into `brain_data/` and builds the brain, which takes about a
 minute. After that it starts in a few seconds. No FlyWire token is needed.
 
 To check which version you have, run `python fly_pet.py --version`. The
-version is also printed at startup and shown at the top of the "See what he sees and thinks" window.
-The current version is **3.1.0**.
+version is also printed at startup and shown in the title of each window.
+The current version is **3.2.0**.
 
 Options:
 
