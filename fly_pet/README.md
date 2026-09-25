@@ -130,11 +130,59 @@ live (his LgLG1, P1 and pIP10; her JO-B, pC1, vpoEN, vpoDN, DNp13, and the
 egg-laying neurons egg-AN, oviIN and oviDN), plus arousal, her mood and her
 egg count.
 
+## Everyday life: eating, grooming, and a life cycle
+
+**Eating.** Drops of sugary food appear on the screen every 40 seconds (up to
+3), and you can right-click a fly and choose "Put food in front of her/him".
+When a fly stands on food, its sugar-taste neurons (LB3) fire more strongly
+the hungrier it is, as in real flies. In her brain, sugar drives MN9, the
+proboscis motor neuron, to 40–130 Hz. That's the main result of the published
+whole-brain model this app is based on (Shiu et al. 2024). When MN9 fires, she
+stops, puts out her proboscis and eats. The drop shrinks, her hunger goes
+down, and once she's full she stops. Hunger builds back up over ~10 minutes.
+
+**Smell.** Food odour reaches the antenna facing it and excites fruity-smell
+olfactory neurons. In her brain that nudges her turning neurons, but not
+reliably toward the food, so she mostly finds food by chance or when you put
+it in front of her.
+
+**Grooming.** Dust collects on the antennae over a few minutes, and faster
+when you swat a fly. Dust excites Johnston's organ touch neurons (JO-C/E). In
+his brain those drive DNg12, the anterior-grooming command neuron (Guo et
+al. 2022), to ~20–30 Hz. He stops, rubs his front legs over his head, and the
+dust comes off.
+
+**What doesn't work, honestly:**
+* **He can't eat.** In the male connectome model, sugar doesn't reach his MN9.
+* **She doesn't groom.** In the female model, antennal touch doesn't reach her
+  DNg12.
+
+Their windows show this: they'll be hungry or dusty and their neurons stay
+quiet.
+
+**Life cycle.** Each egg she lays hatches into a larva after a minute. The
+larva crawls about and eats any food it finds, pupates after two minutes,
+and a new adult fly emerges from the pupa a minute later (real flies take
+about 10 days). The new fly is a daughter or a son at random:
+
+* **A brain of its own.** Daughters run on the FlyWire female brain and sons
+  on the male brain, each in its own process, like their parents.
+* **Starting out.** New flies start pale and are too young to court for 3
+  minutes.
+* **Brain limit.** Each brain needs about one CPU core, so only 4 flies with
+  brains can live at once (change it with `--max-flies`). When the limit is
+  reached, newly hatched flies fly away off the top of the screen.
+* **No memory saved.** New flies don't keep memory between runs. Larvae and
+  pupae are drawn, not simulated: the separate larval connectome isn't
+  included.
+
 ## Memory: they learn about you
 
 Each fly learns the way real flies do, by changing the strength of synapses.
-All ~8,000 visual projection neurons carry a learnable strength that scales
-every one of their output synapses.
+About 7,600 visual projection neurons carry a learnable strength that scales
+every one of their output synapses. The object-tracking neurons (LC10a, LC9)
+are left out: they fire almost constantly, and letting them fade would stop
+the flies from finding each other and food.
 
 * **Habituation.** Each time a visual neuron fires, its synapses get slightly
   weaker. Approach without hurting her, and her looming and escape pathways
@@ -150,7 +198,7 @@ every one of their output synapses.
 
 ## Controls
 
-* **Click** a fly: swat it.
+* **Click** a fly: swat it (and ruffle its antennae).
 * **Drag** a fly: carry it somewhere.
 * **Right-click** a fly: its menu.
   * **What she sees / What he sees**: the fly's field of view all the way
@@ -164,6 +212,7 @@ every one of their output synapses.
   * **What she's doing / What he's doing**: the current action in words,
     command neurons, mating neurons, and memory.
   * **Open all three**.
+  * **Put food in front of her / him**.
   * **Lab override: force her pC1 / his P1 neurons on**.
   * **Pause / resume**, **Quit**.
 
@@ -186,7 +235,7 @@ Tkinter ships with most Python installs (on Debian/Ubuntu:
 
 To check your version, run `python fly_pet.py --version`. The version is also
 printed at startup and shown in each window's title. The current version is
-**4.3.0**.
+**5.0.0**.
 
 Options:
 
@@ -218,6 +267,8 @@ both flies running.
 * **Mating itself is drawn, not simulated.** The brains decide *whether*
   (her vpoDN "yes" vs DNp13 "no", his courtship state). The body code decides
   that a willing pair in contact counts as mating, and animates the mount.
+* **Hunger, dust and the life-cycle timings are hand-written.** The brains
+  decide what to *do* about them (eat, groom, lay).
 * **Egg ripening is hand-written.** How many eggs and how fast they ripen
   is body code. *When* each one is laid comes from her oviDN neurons.
 * **His learning from rejection is hand-written**, like arousal. In real
