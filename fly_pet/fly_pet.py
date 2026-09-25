@@ -75,12 +75,13 @@ import numpy as np
 # 1.0 hand-tuned circuit, 2.0 whole-brain simulation, 3.0 memory,
 # 3.1 "what he sees and thinks" view, 3.2 split into three windows,
 # 4.0 female + male flies, 4.1 walking (LC9), arousal, her choice,
-# 4.2 courtship conditioning (he learns from rejection)
-__version__ = "4.2.0"
+# 4.2 courtship conditioning (he learns from rejection),
+# 4.3 egg laying (oviDN), she approaches him when she says yes
+__version__ = "4.3.0"
 
 HERE = Path(__file__).resolve().parent
 DATA_DIR = HERE / "brain_data"
-CACHE_FORMAT = 5
+CACHE_FORMAT = {"female": 6, "male": 5}
 CACHE_FILE = {"female": DATA_DIR / "brain_female_783.npz",
               "male": DATA_DIR / "brain_male_cns09.npz"}
 REJECTION_FILE = DATA_DIR / "courtship_male.json"
@@ -112,18 +113,24 @@ EXTRA_GROUPS = {
                "pC1": r"^pC1[a-e]$",        # mating drive
                "vpoEN": r"^vpoEN$",         # song -> receptivity
                "vpoDN": r"^DNp37$",         # vaginal plate opening = accept
-               "DNp13": r"^DNp13$"},        # ovipositor extrusion = reject
+               "DNp13": r"^DNp13$",         # ovipositor extrusion = reject
+               # ascending neurons carrying body signals onto oviDN ("egg ready")
+               "egg-AN": r"^(AN_multi_96|AN_SMP_3|AN_SLP_LH_1|AN_multi_18)$",
+               "oviIN": r"^oviIN$",         # holds egg laying back (driven by pC1)
+               "oviDN": r"^oviDN"},         # egg-laying command
     "male": {"LgLG1": r"^LgLG1[ab]$",       # foreleg taste of female pheromone
              "P1": r"^P1_",                 # courtship command
              "pIP10": r"^pIP10$"},          # courtship song
 }
-SENSE_INPUTS = {"female": ["JO-B", "vpoEN"], "male": ["LgLG1"]}
+SENSE_INPUTS = {"female": ["JO-B", "vpoEN", "egg-AN"], "male": ["LgLG1"]}
 SWITCH = {"female": "pC1", "male": "P1"}     # driven by arousal (or a lab override)
 ROLE = {"DNp01": "Giant Fiber: jump", "DNa02": "turn to this side",
         "DNp09": "walk forward", "MDN": "walk backward",
         "JO-B": "hearing song", "pC1": "mating drive", "vpoEN": "song → yes",
         "vpoDN": "yes: opens to mate", "DNp13": "no: rejects",
-        "LgLG1": "tasting a female", "P1": "courtship mode", "pIP10": "sings"}
+        "LgLG1": "tasting a female", "P1": "courtship mode", "pIP10": "sings",
+        "egg-AN": "egg ready (from body)", "oviIN": "holds eggs back",
+        "oviDN": "lay an egg"}
 
 
 def group_names(sex: str) -> list[str]:
@@ -190,7 +197,7 @@ def _groups_from_table(cell_type, side, sex: str) -> dict:
 
 
 def _save_cache(sex, W, n, root_ids, sensory, visual, pos, left_x, groups):
-    np.savez(CACHE_FILE[sex], fmt=CACHE_FORMAT, sex=sex,
+    np.savez(CACHE_FILE[sex], fmt=CACHE_FORMAT[sex], sex=sex,
              indptr=W.indptr.astype(np.int64), indices=W.indices.astype(np.int32),
              data=W.data.astype(np.float32), n=n, root_ids=root_ids,
              sensory=np.flatnonzero(sensory), visual=np.flatnonzero(visual),
@@ -318,7 +325,7 @@ def load_brain_data(sex: str, rebuild: bool = False) -> dict:
     path = CACHE_FILE[sex]
     if not rebuild and path.exists():
         with np.load(path) as z:
-            rebuild = "fmt" not in z.files or int(z["fmt"]) != CACHE_FORMAT
+            rebuild = "fmt" not in z.files or int(z["fmt"]) != CACHE_FORMAT[sex]
     if rebuild or not path.exists():
         (build_female_cache if sex == "female" else build_male_cache)()
     z = np.load(path)
@@ -621,17 +628,24 @@ class Eyes:
         self.hz = {g: 0.0 for g in SENSORY}
         self.seen = []               # what's in view, for the "what she sees" window
 
+    MICROSACCADE = 0.15   # rad/s: flies jiggle their retinas, so still things
+                          # still move a little on the eye (Fenk et al. 2022)
+
     def see(self, objects, dt: float):
-        """objects: (name, dist px, bearing rad [+ = fly's left], radius px, speed px/s)."""
+        """objects: (name, dist px, bearing rad [+ = fly's left], radius px,
+        speed px/s, gain). `gain` scales the object-tracking neurons (LC10a,
+        LC9) for that object: arousal turns up a fly's visual response to its
+        partner (Hindmarsh Sten et al. 2021)."""
         feature_sum = {g: 0.0 for g in SENSORY}
         self.seen = []
-        for name, dist, bearing, radius, speed in objects:
+        for name, dist, bearing, radius, speed, gain in objects:
             alpha = 2 * math.atan(radius / max(dist, 1.0))        # angular size
             prev = self._prev_alpha.get(name, alpha)
             looming = max((alpha - prev) / max(dt, 1e-3), 0.0)    # rad/s
             self._prev_alpha[name] = alpha
             # How fast it sweeps across the eye (its own motion or the fly's turning)
-            sweep = abs(_wrap(bearing - self._prev_bearing.get(name, bearing))) / max(dt, 1e-3)
+            sweep = (abs(_wrap(bearing - self._prev_bearing.get(name, bearing)))
+                     / max(dt, 1e-3) + self.MICROSACCADE)
             self._prev_bearing[name] = bearing
 
             visible = _sig((self.BLIND_SPOT - abs(bearing)) / 0.05)
@@ -643,9 +657,9 @@ class Eyes:
                 "LPLC2": _clamp(_sig((alpha - 0.35) / 0.08) * looming),  # collision course
                 "LC16": _clamp(frontal ** 2 * _sig((alpha - 0.18) / 0.05)
                                * (0.4 + 0.6 * _clamp(looming * 2))),    # frontal approach
-                "LC10a": _clamp(_sig((0.25 - alpha) / 0.05)
+                "LC10a": _clamp(gain * _sig((0.25 - alpha) / 0.05)
                                 * _clamp(sweep / 1.2)),                 # small moving object
-                "LC9": _clamp(_sig((0.3 - alpha) / 0.06)
+                "LC9": _clamp(gain * _sig((0.3 - alpha) / 0.06)
                               * _clamp(sweep / 1.2)),                   # small object
             }
             for g in SENSORY:
@@ -772,9 +786,12 @@ class Arousal:
             self.rejected *= math.exp(-dt / self.REJECTION_TAU)
         else:
             self.level += (0.4 * cue * (1 - self.level) - self.level / 40) * dt
-            # Mood drifts around 0.5 over minutes; after mating it drops to 0
-            # (real mated females reject males for days, here for minutes).
-            self.mood += ((0.5 - self.mood) * dt / 90
+            # Mood drifts around 0.5 over minutes. After mating it drops to 0 and
+            # stays low for several minutes: sex peptide from the male makes
+            # real mated females reject males for days.
+            since = now - self.mated_at
+            target = 0.5 * (1 - math.exp(-since / 300))
+            self.mood += ((target - self.mood) * dt / 90
                           + random.gauss(0, 0.2 * math.sqrt(2 * dt / 90)))
         self.level = _clamp(self.level)
         self.mood = _clamp(self.mood)
@@ -824,6 +841,13 @@ class Fly:
         self.hearing = 0.0          # female: loudness of the male's song
         self.sing_side = 1          # male: wing toward the female (+1 = left)
         self.mated_until = 0.0
+        self.eggs_ripe = 0          # female: fertilised eggs ready to lay
+        self.eggs_to_come = 0       # female: eggs that will still ripen
+        self._egg_timer = 0.0
+        self._ovi_spikes = 0.0      # oviDN spikes since the egg was ready
+        self._last_ovi = None
+        self.eggs_laid = 0
+        self.laying_until = 0.0
         self.swatted_at = 0.0
         self._press = None
         self.dragging = False
@@ -891,18 +915,26 @@ class Fly:
 
     # ------------------------------------------------------------ senses + body
     def sense(self, dt: float, cursor, cursor_speed: float, others):
+        # Arousal turns up the eyes' response to the partner: his with his
+        # arousal, hers while she's saying yes - so she walks to him.
+        if self.sex == "male":
+            partner_gain = 1.0 + 3.0 * self.arousal.level
+        else:
+            partner_gain = 4.0 if self.motor["open"] else 1.0
         objects = []
-        for name, (ox, oy), radius, speed in (
-                [("cursor", cursor, 14.0, cursor_speed)]
-                + [(f"the {o.sex}", (o.x, o.y), o.radius, o.speed_px) for o in others]):
+        for name, (ox, oy), radius, speed, gain in (
+                [("cursor", cursor, 14.0, cursor_speed, 1.0)]
+                + [(f"the {o.sex}", (o.x, o.y), o.radius, o.speed_px, partner_gain)
+                   for o in others]):
             dx, dy = ox - self.x, oy - self.y
             # Screen y points down, so the fly's left is at heading - 90 degrees.
             bearing = _wrap(self.heading - math.atan2(dy, dx))
-            objects.append((name, math.hypot(dx, dy), bearing, radius, speed))
+            objects.append((name, math.hypot(dx, dy), bearing, radius, speed, gain))
         hz = dict(self.eyes.see(objects, dt))
         if self.sex == "female":
             hz["JO-B"] = 150.0 * self.hearing     # antennal hearing neurons
             hz["vpoEN"] = 60.0 * self.hearing     # song-tuned neurons (Wang et al. 2021)
+            hz["egg-AN"] = 120.0 if self.eggs_ripe else 0.0   # an egg is in the uterus
         else:
             hz["LgLG1"] = 120.0 * self.taste
         hz[SWITCH[self.sex]] = 100.0 if self.switch_on.get() else self.arousal.drive_hz()
@@ -951,6 +983,37 @@ class Fly:
         x1 = min(max(self.x + math.cos(angle) * 200, m), self.app.sw - m)
         y1 = min(max(self.y + math.sin(angle) * 200, m), self.app.sh - m)
         self.jump = (time.perf_counter(), 0.3, (self.x, self.y), (x1, y1))
+
+    EGG_RIPEN_SECONDS = 15     # one fertilised egg ripens this often after mating
+    EGGS_PER_MATING = 10       # (real flies: dozens per day, for days)
+    OVI_THRESHOLD = 12         # oviDN spikes that trigger laying (rise to threshold)
+
+    def update_eggs(self, dt: float, now: float):
+        """Female: ripen eggs after mating; lay one when her oviDN neurons have
+        fired enough (Vijayan et al. 2023: oviDN activity rises to a threshold,
+        then the egg is laid). Returns where an egg was laid, or None."""
+        if self.sex != "female":
+            return None
+        if self.eggs_to_come and not self.eggs_ripe:
+            self._egg_timer += dt
+            if self._egg_timer > self.EGG_RIPEN_SECONDS:
+                self._egg_timer = 0.0
+                self.eggs_to_come -= 1
+                self.eggs_ripe = 1
+                self._ovi_spikes = 0.0
+        count = int(self.brain.group_spikes[self.body.names.index("oviDN")])
+        new = 0 if self._last_ovi is None else count - self._last_ovi
+        self._last_ovi = count
+        if self.eggs_ripe:
+            self._ovi_spikes += new
+            if self._ovi_spikes >= self.OVI_THRESHOLD:
+                self.eggs_ripe = 0
+                self._ovi_spikes = 0.0
+                self.eggs_laid += 1
+                self.laying_until = now + 1.0             # she pauses to lay it
+                return (self.x - math.cos(self.heading) * 24 * self.scale,
+                        self.y - math.sin(self.heading) * 24 * self.scale)
+        return None
 
     def head(self):
         return (self.x + math.cos(self.heading) * 10 * self.scale,
@@ -1082,10 +1145,14 @@ class Fly:
             elif h["P1"] > 20:
                 parts.append("in courtship mode (P1)")
         else:
+            if time.perf_counter() < self.laying_until:
+                return "Laying an egg! (her oviDN neurons reached threshold)"
             if self.motor["reject"]:
                 parts.append("saying no - rejecting (DNp13)")
             elif self.motor["open"]:
                 parts.append("saying yes - opening to mate (vpoDN)")
+            if self.eggs_ripe:
+                parts.append("has an egg ready (oviDN building up)")
         if gf > Body.JUMP_HZ / 3:
             parts.append("getting nervous (Giant Fiber charging)")
         if abs(turn) > 8:
@@ -1124,6 +1191,7 @@ class App:
         self.windows = {}                # (sex, name) -> (window, canvas, state)
         self.paused = False
         self.mating = None               # (male, female, end time)
+        self.eggs = []                   # little egg windows on the screen
         self._last = time.perf_counter()
         self._last_cursor = self.root.winfo_pointerxy()
         self.root.after(0, self.tick)
@@ -1179,7 +1247,11 @@ class App:
             for f in self.flies:
                 if f.brain.ready:
                     f.sense(dt, (cx, cy), cursor_speed, [o for o in self.flies if o is not f])
-                f.move(dt, frozen=not f.brain.ready or self._is_mating(f))
+                f.move(dt, frozen=(not f.brain.ready or self._is_mating(f)
+                                   or now < f.laying_until))
+                spot = f.update_eggs(dt, now) if not self._is_mating(f) else None
+                if spot:
+                    self.lay_egg(*spot)
             self._update_mating(now)
         for f in self.flies:
             f.draw(self._is_mating(f))
@@ -1190,6 +1262,26 @@ class App:
             self._last_save = now
         self._last_save = getattr(self, "_last_save", now)
         self.root.after(int(1000 / self.FPS), self.tick)
+
+    MAX_EGGS = 40
+
+    def lay_egg(self, x: float, y: float):
+        """Put a little egg on the screen where she laid it."""
+        win = self.tk.Toplevel(self.root)
+        win.overrideredirect(True)
+        win.wm_attributes("-topmost", True)
+        bg = self.transparent_background(win)
+        c = self.tk.Canvas(win, width=16, height=16, bg=bg, highlightthickness=0, bd=0)
+        c.pack()
+        c.create_oval(4, 2, 12, 14, fill="#fbf8ef", outline="#c9c2ae")
+        c.create_line(6, 3, 4, 0, fill="#c9c2ae")              # dorsal filaments
+        c.create_line(10, 3, 12, 0, fill="#c9c2ae")
+        win.geometry(f"16x16+{int(x) - 8}+{int(y) - 8}")
+        self.eggs.append(win)
+        if len(self.eggs) > self.MAX_EGGS:
+            self.eggs.pop(0).destroy()
+        for f in self.flies:                                   # keep flies on top
+            f.win.lift()
 
     def _is_mating(self, fly) -> bool:
         return bool(self.mating) and fly in self.mating[:2]
@@ -1232,6 +1324,7 @@ class App:
                 f.mated_until = now + self.REMATING_PAUSE
                 m.arousal.just_mated(now)
                 f.arousal.just_mated(now)
+                f.eggs_to_come += Fly.EGGS_PER_MATING          # fertilised eggs
                 m.heading = _wrap(m.heading + math.pi)
                 m.x -= math.cos(f.heading) * 30
                 m.y -= math.sin(f.heading) * 30
@@ -1244,13 +1337,13 @@ class App:
                 m.win.lift()
             return
         # Copulation happens when he's courting, she's accepting at that moment
-        # (vaginal plate open, not rejecting), and he is touching her with his
-        # forelegs while facing her. Then the body does what real males do:
-        # he walks around and mounts her from behind.
+        # (vaginal plate open, not rejecting), and their bodies touch - however
+        # they met. Then the body does what real males do: he walks around and
+        # mounts her from behind.
         courting = m.motor["sing"] or m.body.hz["P1"] > 20
         accepting = f.motor["open"] and not f.motor["reject"] and now > f.mated_until
-        facing = abs(_wrap(m.heading - math.atan2(f.y - m.y, f.x - m.x))) < 1.0
-        if courting and accepting and m.taste and facing and not (m.jump or f.jump):
+        touching = math.hypot(m.x - f.x, m.y - f.y) < 1.6 * (m.radius + f.radius) * f.scale
+        if courting and accepting and touching and not (m.jump or f.jump):
             self.mating = (m, f, now + self.MATING_SECONDS)
 
     # ------------------------------------------------ windows into their minds
@@ -1264,7 +1357,8 @@ class App:
         return {
             "eyes": (f"What {fly.he} sees", 520, 342, self._draw_eyes, spots["eyes"]),
             "brain": (f"{His} brain", 680, 420, self._draw_brain, spots["brain"]),
-            "neurons": (f"What {fly.he}'s doing", 460, 540, self._draw_neurons,
+            "neurons": (f"What {fly.he}'s doing", 460,
+                        610 if fly.sex == "female" else 540, self._draw_neurons,
                         spots["neurons"]),
         }
 
@@ -1453,8 +1547,12 @@ class App:
         t(c, 10, y, line, "#f2d16b", 9)
         t(c, 10, y + 16, "(arousal stands in for dopamine and hormones, which the "
                          "connectome doesn't contain)", "#6d7785", 8)
+        if fly.sex == "female":
+            t(c, 10, y + 34, f"Eggs: {fly.eggs_laid} laid · {fly.eggs_ripe} ready · "
+                             f"{fly.eggs_to_come} still ripening", "#f2d16b", 9)
+            y += 18
 
-        y = 440
+        y = max(440, y + 44)
         t(c, 10, y, "Memory (visual synapse strength)", "#e6e9ee", 10, True)
         mem = "   ".join(
             f"{ct} {(fly.brain.memory_of(f'{ct}_L') + fly.brain.memory_of(f'{ct}_R')) / 2:.2f}x"
@@ -1477,7 +1575,7 @@ def simulate(sex: str, seconds: float, noise: float):
         dist = max(700 - 300 * max(t - 1.0, 0), 10)     # 1 s still, then approach
         speed = 300 if t > 1.0 else 0
         bearing = 0.6 + (0.4 * math.sin(3 * t) if t > 1.0 else 0)   # weaving
-        brain.input_hz.update(eyes.see([("cursor", dist, bearing, 14.0, speed)], frame))
+        brain.input_hz.update(eyes.see([("cursor", dist, bearing, 14.0, speed, 1.0)], frame))
         for _ in range(int(frame * 1000)):
             brain.step()
         motor = body.read(frame)

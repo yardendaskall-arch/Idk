@@ -68,7 +68,14 @@ How each part works:
 
 * **Finding each other.** A moving fly is a small moving object, so it
   excites LC9 → DNp09 and LC10a → DNa02 in the other fly's brain. They walk
-  toward each other.
+  toward each other. Flies constantly jiggle their retinas (Fenk et al. 2022),
+  so even a still fly registers a little.
+* **Arousal sharpens their eyes for each other.** In courting males, arousal
+  turns up the visual neurons' response to the female (Hindmarsh Sten et al.
+  2021). Here his arousal does that, and so does her "yes": while she's
+  saying yes, her eyes respond 4× more strongly to him, so her own
+  walking circuits take her to him. (That this also happens in females is my
+  extension; real receptive females mostly slow down and wait.)
 * **Arousal (the one hand-written part in the middle).** In the simulation,
   the senses alone never switch on his P1 courtship neurons or her pC1
   mating-drive neurons: her pC1 is actually *inhibited* when she sees him. In
@@ -97,10 +104,20 @@ How each part works:
   over ~15 minutes (hours in real flies) and is remembered between runs in
   `brain_data/courtship_male.json`. His window shows it as "interest ×0.40".
 * **Mating (♥).** It happens when he's courting, she's saying yes at that
-  moment, and he's touching her with his forelegs while facing her. Then he
-  mounts her from behind and rides on her back for 20 seconds (real flies
-  take ~20 minutes). She won't mate again for at least a minute, and her
-  mood takes minutes to recover.
+  moment, and their bodies touch, whoever walked to whom. Then he mounts her
+  from behind and rides on her back for 20 seconds (real flies take ~20
+  minutes). Afterwards her mood drops to zero and stays low for about 5
+  minutes, so she rejects him (real mated females reject males for days,
+  because of sex peptide from the male).
+* **Egg laying.** Mating gives her 10 fertilised eggs, and one ripens every
+  15 seconds. A ripe egg sends an "egg ready" signal into her brain through
+  the ascending neurons that feed her egg-laying command neurons (oviDN).
+  When oviDN has fired enough, she pauses and lays the egg, which stays on
+  your screen. That's how real oviDN works: its activity rises until it
+  crosses a threshold, then the egg is laid (Vijayan et al. 2023). Her pC1
+  mating drive also excites oviIN, which holds egg laying back, as in
+  Wang et al. 2020. She never lays while mating. Up to 40 eggs stay on
+  screen.
 
 **Lab override.** Right-click a fly and choose "Lab override" to force its P1
 or pC1 fully on, as scientists do with light. With her pC1 forced on, she
@@ -109,8 +126,9 @@ says yes almost every time.
 You can still **drag** either fly to put them together.
 
 The "What she's doing" and "What he's doing" windows show the mating neurons
-live (his LgLG1, P1 and pIP10; her JO-B, pC1, vpoEN, vpoDN and DNp13), plus
-arousal and her mood.
+live (his LgLG1, P1 and pIP10; her JO-B, pC1, vpoEN, vpoDN, DNp13, and the
+egg-laying neurons egg-AN, oviIN and oviDN), plus arousal, her mood and her
+egg count.
 
 ## Memory: they learn about you
 
@@ -168,7 +186,7 @@ Tkinter ships with most Python installs (on Debian/Ubuntu:
 
 To check your version, run `python fly_pet.py --version`. The version is also
 printed at startup and shown in each window's title. The current version is
-**4.2.0**.
+**4.3.0**.
 
 Options:
 
@@ -200,6 +218,8 @@ both flies running.
 * **Mating itself is drawn, not simulated.** The brains decide *whether*
   (her vpoDN "yes" vs DNp13 "no", his courtship state). The body code decides
   that a willing pair in contact counts as mating, and animates the mount.
+* **Egg ripening is hand-written.** How many eggs and how fast they ripen
+  is body code. *When* each one is laid comes from her oviDN neurons.
 * **His learning from rejection is hand-written**, like arousal. In real
   flies it involves the mushroom body and the pheromones of mated females.
 * **The learning rule is simplified.** Real flies learn mostly in the
