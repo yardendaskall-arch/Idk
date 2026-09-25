@@ -10,6 +10,9 @@ Nothing in this file decides what the fly does. The code only:
   * EYES:  turns the cursor into spikes in four types of visual neuron
            (LC4, LPLC2, LC16, LC10a, left and right optic lobe),
   * BRAIN: runs the spiking network (no behaviour rules inside it),
+  * MEMORY: the output synapses of visual neurons weaken each time they're
+           used without harm (habituation) and strengthen when the fly is
+           swatted right after (sensitization). Saved between runs.
   * BODY:  reads out four types of descending neuron and moves the drawing:
              DNp01 (Giant Fiber) -> jump
              DNa02 (left/right)  -> turn toward that side
@@ -55,6 +58,7 @@ import numpy as np
 HERE = Path(__file__).resolve().parent
 DATA_DIR = HERE / "brain_data"
 CACHE_FILE = DATA_DIR / "brain_783.npz"
+MEMORY_FILE = DATA_DIR / "memory.npz"
 MODEL_REPO = "https://raw.githubusercontent.com/philshiu/Drosophila_brain_model/main/"
 CONN_FILE = "Connectivity_783.parquet"
 NEURON_FILE = "Completeness_783.csv"
@@ -150,18 +154,23 @@ def build_brain_cache():
 
     np.savez(CACHE_FILE, indptr=W.indptr.astype(np.int64),
              indices=W.indices.astype(np.int32), data=W.data.astype(np.float32),
-             sensory=np.flatnonzero(sensory), n=n,
+             sensory=np.flatnonzero(sensory), n=n, root_ids=root_ids,
+             visual=np.flatnonzero((ann.super_class == "visual_projection").to_numpy()),
              **{f"group_{g}": idx for g, idx in groups.items()})
     print(f"[data] saved {CACHE_FILE.name}: {n:,} neurons, {W.nnz:,} connections")
 
 
 def load_brain_data(rebuild: bool = False) -> dict:
+    if not rebuild and CACHE_FILE.exists():
+        with np.load(CACHE_FILE) as z:
+            rebuild = "visual" not in z.files       # cache from an older version
     if rebuild or not CACHE_FILE.exists():
         build_brain_cache()
     z = np.load(CACHE_FILE)
     return {
         "n": int(z["n"]), "indptr": z["indptr"], "indices": z["indices"],
-        "data": z["data"], "sensory": z["sensory"],
+        "data": z["data"], "sensory": z["sensory"], "visual": z["visual"],
+        "root_ids": z["root_ids"],
         "groups": {g: z[f"group_{g}"] for g in GROUPS},
     }
 
@@ -181,6 +190,13 @@ class WholeBrain:
     ADAPT = 1.0         # mV added to adaptation per spike
     TAU_ADAPT = 200.0   # ms
     NOISE_KICK = 2.0    # mV per random synaptic event
+
+    # Learning at the output synapses of visual projection neurons
+    HABITUATION = 0.002       # fraction of strength lost per spike
+    SENSITIZATION = 0.008     # strength gained per recent spike when hurt
+    ELIGIBILITY_TAU = 3.0     # s, how far back "what I just saw" reaches
+    MEMORY_TAU = 1800.0       # s, drift back to baseline (30 min)
+    MIN_STRENGTH, MAX_STRENGTH = 0.15, 3.0
 
     def __init__(self, data: dict, noise: float = 0.05, seed: int | None = None):
         f32 = np.float32
@@ -207,6 +223,16 @@ class WholeBrain:
         k = int(len(self._noise_pool) * noise)
         self._noise_kicks = np.where(np.arange(k) % 2 == 0, self.NOISE_KICK,
                                      -self.NOISE_KICK).astype(f32)
+
+        # Memory: one strength per visual projection neuron that scales all
+        # of its output synapses, plus an eligibility trace of recent spikes.
+        self.root_ids = data["root_ids"]
+        self.plastic = data["visual"]
+        self._is_plastic = np.zeros(n, bool)
+        self._is_plastic[self.plastic] = True
+        self.strength = np.ones(n, f32)
+        self.eligibility = np.zeros(n, f32)
+        self._hurt = False
 
         self._group_of = np.full(n, -1, np.int16)
         for i, g in enumerate(GROUPS):
@@ -252,14 +278,55 @@ class WholeBrain:
             lens = self.indptr[s + 1] - starts
             offs = np.repeat(starts - np.cumsum(lens) + lens, lens)
             j = offs + np.arange(lens.sum())
-            buf += np.bincount(self.indices[j], weights=self.weights[j],
+            weights = self.weights[j] * np.repeat(self.strength[s], lens)
+            buf += np.bincount(self.indices[j], weights=weights,
                                minlength=self.n).astype(np.float32)
+            sp = s[self._is_plastic[s]]
+            if len(sp):                   # habituation: used synapses weaken
+                self.strength[sp] *= 1 - self.HABITUATION
+                self.eligibility[sp] += 1
             g = self._group_of[s]
             g = g[g >= 0]
             if len(g):
                 self.group_spikes += np.bincount(g, minlength=len(GROUPS))
         self.total_spikes += len(s)
         self.steps += 1
+        if self.steps % 100 == 0:
+            self._update_memory(0.1)
+
+    def _update_memory(self, seconds: float):
+        p = self.plastic
+        if self._hurt:                    # sensitization: what I just saw hurt
+            self._hurt = False
+            self.strength[p] += self.SENSITIZATION * self.eligibility[p]
+        st = self.strength[p]
+        st += (1 - st) * (1 - math.exp(-seconds / self.MEMORY_TAU))
+        self.strength[p] = np.clip(st, self.MIN_STRENGTH, self.MAX_STRENGTH)
+        self.eligibility[p] *= math.exp(-seconds / self.ELIGIBILITY_TAU)
+
+    def hurt(self):
+        """Something bad just happened to the fly (it was swatted)."""
+        self._hurt = True
+
+    def memory_of(self, group: str) -> float:
+        return float(self.strength[self.groups[group]].mean())
+
+    def save_memory(self, path: Path):
+        np.savez(path, root_ids=self.root_ids[self.plastic],
+                 strength=self.strength[self.plastic], saved=time.time())
+
+    def load_memory(self, path: Path):
+        if not path.exists():
+            return
+        with np.load(path) as z:
+            lookup = dict(zip(z["root_ids"].tolist(), z["strength"].tolist()))
+            away = max(time.time() - float(z["saved"]), 0.0)
+        forget = math.exp(-away / self.MEMORY_TAU)     # memories fade while off
+        for i in self.plastic:
+            v = lookup.get(int(self.root_ids[i]))
+            if v is not None:
+                self.strength[i] = 1 + (v - 1) * forget
+        print(f"[memory] loaded (last run {away / 60:.0f} min ago)")
 
     # -- real-time loop in a background thread --------------------------------
     def start(self):
@@ -402,13 +469,17 @@ class FlyPet:
         self.menu.add_command(label="Pause / resume", command=self.toggle_pause)
         self.menu.add_separator()
         self.menu.add_command(label="Quit", command=self.quit)
+        self.canvas.bind("<Button-1>", self._swat)
         self.canvas.bind("<Button-3>", self._popup)
         self.canvas.bind("<Button-2>", self._popup)   # macOS right-click
         self.root.bind("<Escape>", lambda e: self.quit())
 
+        self._swatted_at = 0.0
+        self.brain.load_memory(MEMORY_FILE)
         self._place()
         self.brain.start()
         self.root.after(0, self.tick)
+        self.root.after(60_000, self._autosave)
 
     def _setup_transparency(self) -> str:
         """Make the window background see-through where the OS allows it."""
@@ -435,8 +506,18 @@ class FlyPet:
         for g in SENSORY:
             self.brain.input_hz[g] = 0.0
 
+    def _swat(self, event):
+        """Left-click: swat the fly. What it saw just before becomes scarier."""
+        self.brain.hurt()
+        self._swatted_at = time.perf_counter()
+
+    def _autosave(self):
+        self.brain.save_memory(MEMORY_FILE)
+        self.root.after(60_000, self._autosave)
+
     def quit(self):
         self.brain.stop()
+        self.brain.save_memory(MEMORY_FILE)
         self.root.destroy()
 
     # ----------------------------------------------------------- simulation
@@ -561,6 +642,10 @@ class FlyPet:
         for side in (1, -1):
             poly(ellipse(10.5, side * 3.4, 3.2, 2.6, n=10), fill="#c0262a",
                  outline="#6d1012")
+        # Red flash when swatted
+        if time.perf_counter() - self._swatted_at < 0.3:
+            x, y = tr(0, 0)
+            c.create_oval(x - 22, y - 22, x + 22, y + 22, outline="#e0323a", width=3)
         # Giant Fiber flash when escape fires
         if flying:
             x, y = tr(0, 0)
@@ -579,7 +664,7 @@ class FlyPet:
         self.panel.wm_attributes("-topmost", True)
         self.panel.protocol("WM_DELETE_WINDOW", self.toggle_panel)
         self.panel.configure(bg="#14161a")
-        self.pcanvas = tk.Canvas(self.panel, width=440, height=310, bg="#14161a",
+        self.pcanvas = tk.Canvas(self.panel, width=440, height=330, bg="#14161a",
                                  highlightthickness=0)
         self.pcanvas.pack(padx=8, pady=8)
         self._panel_last = (time.perf_counter(), self.brain.total_spikes)
@@ -613,6 +698,15 @@ class FlyPet:
 
         bars("Eyes (Hz)", SENSORY, self.brain.input_hz, 10, "#4aa3df")
         bars("Descending (Hz)", MOTOR, self.body.hz, 230, "#e0864a")
+
+        mem = "   ".join(f"{t} {self.brain.memory_of(f'{t}_L') * 0.5 + self.brain.memory_of(f'{t}_R') * 0.5:.2f}x"
+                         for t in SENSORY_TYPES)
+        c.create_text(10, 272, anchor="nw", fill="#e6e9ee",
+                      font=("TkDefaultFont", 10, "bold"), text="Memory (visual synapse strength)")
+        c.create_text(10, 292, anchor="nw", fill="#f2d16b", font=("TkDefaultFont", 9),
+                      text=mem)
+        c.create_text(10, 310, anchor="nw", fill="#8a93a0", font=("TkDefaultFont", 8),
+                      text="below 1 = getting used to you   above 1 = wary (swatted)")
 
     def run(self):
         self.root.mainloop()

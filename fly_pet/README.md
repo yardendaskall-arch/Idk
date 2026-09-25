@@ -36,7 +36,29 @@ These behaviours come out of the wiring. None of them are programmed:
 * **Left alone**, weak random synaptic activity gives the occasional
   spontaneous twitch or turn.
 
-Right-click the fly and choose **Show brain activity** for live firing rates
+## Memory: it learns about you
+
+The fly learns the way real flies do: by changing the strength of synapses.
+All ~8,000 visual projection neurons carry a learnable strength that scales
+every one of their output synapses.
+
+* **Habituation.** Each time a visual neuron fires, its synapses get slightly
+  weaker. If you keep approaching without hurting him, his looming and
+  escape pathways weaken and he lets the cursor get closer. In testing, about
+  10 harmless approaches cut his escape distance from ~135 px to ~80 px.
+* **Sensitization.** **Left-click the fly to swat it.** The neurons that
+  fired in the ~3 seconds before the swat get stronger, so whatever he just
+  saw becomes scarier. One swat undoes several approaches' worth of calming.
+* **Forgetting.** Strengths drift back to normal over about 30 minutes.
+* **Across runs.** Memory is saved to `brain_data/memory.npz` every minute and
+  when you quit, and reloaded at start. Time spent closed counts as time to
+  forget.
+
+The brain panel shows the current strengths ("1.00x" is untouched, below 1
+means he's getting used to you, above 1 means he's wary). Delete
+`brain_data/memory.npz` to give him a fresh start.
+
+Left-click to swat him. Right-click the fly and choose **Show brain activity** for live firing rates
 of the visual and descending neurons, total spikes per second, and how fast
 the brain is running compared with real time. Choose **Quit** to close it.
 
@@ -46,6 +68,12 @@ the brain is running compared with real time. Choose **Quit** to close it.
   (DNp09) is almost never driven by the visual input or background activity,
   so the fly mostly turns in place and jumps.
 * **Backing up is weak.** LC16 → MDN only shows up briefly, during escapes.
+* **The learning rule is simplified.** Real flies learn mostly in the
+  mushroom body, driven by dopamine. Here, learning happens directly at the
+  visual neurons' synapses.
+* **It is not conscious.** Nobody knows how to build consciousness, or even
+  whether real fruit flies have it. This is a model of the fly's wiring, not
+  of a mind.
 * **The neuron model is simple**, a leaky integrate-and-fire model with
   parameters from Shiu et al. 2024. Real neurons, neuromodulation, learning
   and hunger are all far richer.
