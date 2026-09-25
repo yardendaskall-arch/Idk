@@ -18,25 +18,31 @@ fire.
 ```
 SENSES (code)                  BRAIN (connectome)          BODY (code)
 eyes: cursor + other fly  →    every neuron spiking   →    descending neurons
-  LC4, LPLC2, LC16, LC10a      (each fly in its own          DNp01 (Giant Fiber) → jump
-his forelegs: taste her        process)                      DNa02 left/right   → turn
-  LgLG1 (ppk23 cells)                                        DNp09 / MDN        → walk fwd / back
-her antennae: hear his song                                  pIP10 (male)       → sing
-  JO-B                                                       vpoDN (female)     → accept
-                                                             DNp13 (female)     → reject
+  LC4, LPLC2, LC16,            (each fly in its own          DNp01 (Giant Fiber) → jump
+  LC10a, LC9                   process)                      DNa02 left/right   → turn
+his forelegs: taste her                                      DNp09 / MDN        → walk fwd / back
+  LgLG1 (ppk23 cells)          AROUSAL (code)                pIP10 (male)       → sing
+her antennae: hear his song    stand-in for dopamine and     vpoDN (female)     → accept
+  JO-B, vpoEN                  hormones → P1 / pC1           DNp13 (female)     → reject
 ```
 
-The hand-written parts are the senses (how the world becomes spikes in
-sensory neurons) and the body (how descending neuron firing becomes movement).
+The hand-written parts are:
+
+* **The senses:** how the world becomes spikes in sensory neurons.
+* **Arousal:** one slow number per fly, standing in for dopamine and hormones.
+* **The body:** how descending neuron firing becomes movement.
+
 Everything in between is the connectome.
 
 ## What it does
 
 These behaviours come out of the wiring. None of them are programmed:
 
-* **A cursor moving nearby** excites LC10a (small-object neurons), which
-  drives DNa02 on the same side. The fly turns to face your cursor and
-  follows it as it moves.
+* **A cursor moving nearby** excites LC10a and LC9 (small-object neurons).
+  LC10a drives DNa02 on the same side, and LC9 drives DNp09 (P9), the
+  forward-walking neuron. The fly turns toward your cursor and walks after it.
+  That's the same pathway male flies use to chase females (Bidaye et al.
+  2020).
 * **A cursor rushing at it** excites LC4 and LPLC2 (looming detectors), which
   drive the Giant Fiber to 100–340 Hz. The fly jumps, and DNa02 on the far
   side tilts the take-off away from you.
@@ -53,28 +59,51 @@ This adds a male, running on the male connectome. They see each other the
 same way they see your cursor. His forelegs taste her when he touches her,
 and she hears his song when he's close.
 
-What I found testing it:
+In testing, with no help at all, they walked to each other within seconds.
+He got aroused and sang, she went back and forth between yes and no, and
+about 90 seconds in they mated. Afterwards her mood dropped, and when he
+courted her again she rejected him.
 
-* **On their own, they don't court.** Seeing her, even tasting her, barely
-  activates his courtship neurons (P1 stays below 1 Hz). Her song-hearing
-  neurons (JO-B) don't reach her "yes" neurons either. Real courtship also
-  depends on smell, hormones and internal state, which aren't in the model.
-* **With the lab switches on, their brains do the rest.** Scientists make
-  flies court by switching on P1 (males) or pC1 (females) with light.
-  Right-click a fly to flip the same switch:
-  * **His P1 on:** his brain fires his song neuron pIP10 at 40–140 Hz, and
-    he holds out a wing to sing (♪). If he sees her, he turns toward her
-    while singing.
-  * **Her pC1 on:** her vpoDN neuron ("yes, open to mate") fires at 30–110 Hz
-    and her DNp13 neuron ("no, reject") stays silent.
-* **Neither walks forward much**, so they rarely meet on their own. **Drag the
-  male with the mouse** and drop him right behind her, facing the same way.
-  If he's courting and she's accepting, they mate (♥): he rides on her back
-  for 20 seconds (real flies take about 20 minutes). Afterwards she won't
-  mate again for a minute.
+How each part works:
+
+* **Finding each other.** A moving fly is a small moving object, so it
+  excites LC9 → DNp09 and LC10a → DNa02 in the other fly's brain. They walk
+  toward each other.
+* **Arousal (the one hand-written part in the middle).** In the simulation,
+  the senses alone never switch on his P1 courtship neurons or her pC1
+  mating-drive neurons: her pC1 is actually *inhibited* when she sees him. In
+  real flies, those neurons are gated by dopamine and hormones, which build
+  up over seconds to minutes and aren't in any connectome. So each fly has
+  one slow arousal number:
+  * **His** rises while he sees her nearby and even more while he tastes
+    her, and fades over ~30 s. It drives P1 up to 60 Hz. After mating he
+    rests for a minute.
+  * **Hers** rises while she hears his song and fades over ~40 s. It's
+    multiplied by her **mood**, which is random each run, drifts over
+    minutes, and drops to zero after mating. It drives pC1 up to 50 Hz.
+* **His song comes from his brain.** P1 → pIP10 (the song neuron) fires at
+  about twice the P1 rate. Above 30 Hz he holds a wing out and sings (♪).
+* **Her yes or no comes from her brain.** His song drives her song-tuned
+  vpoEN neurons. With her pC1 low, her brain turns that song into **no**:
+  DNp13 wins, and she extrudes her ovipositor at him. With her pC1 higher,
+  **yes** wins: vpoDN opens her to mating. In between, noise tips it either
+  way, so the same fly can go back and forth.
+* **Rejection hurts his arousal.** Being rejected up close lowers his
+  arousal, as real males learn from rejection.
+* **Mating (♥).** It happens when he's courting, she's saying yes at that
+  moment, and he's right behind her facing the same way. He rides on her
+  back for 20 seconds (real flies take ~20 minutes). She won't mate again
+  for at least a minute, and her mood takes minutes to recover.
+
+**Lab override.** Right-click a fly and choose "Lab override" to force its P1
+or pC1 fully on, as scientists do with light. With her pC1 forced on, she
+says yes almost every time.
+
+You can still **drag** either fly to put them together.
 
 The "What she's doing" and "What he's doing" windows show the mating neurons
-live: his LgLG1, P1 and pIP10; her JO-B, pC1, vpoEN, vpoDN and DNp13.
+live (his LgLG1, P1 and pIP10; her JO-B, pC1, vpoEN, vpoDN and DNp13), plus
+arousal and her mood.
 
 ## Memory: they learn about you
 
@@ -110,7 +139,7 @@ every one of their output synapses.
   * **What she's doing / What he's doing**: the current action in words,
     command neurons, mating neurons, and memory.
   * **Open all three**.
-  * **Switch on her pC1 / his P1 neurons**.
+  * **Lab override: force her pC1 / his P1 neurons on**.
   * **Pause / resume**, **Quit**.
 
 ## Install and run
@@ -132,7 +161,7 @@ Tkinter ships with most Python installs (on Debian/Ubuntu:
 
 To check your version, run `python fly_pet.py --version`. The version is also
 printed at startup and shown in each window's title. The current version is
-**4.0.0**.
+**4.1.0**.
 
 Options:
 
@@ -151,9 +180,16 @@ both flies running.
 
 ## Honest limitations
 
-* **They rarely walk forward.** The forward-walking neuron (DNp09) is almost
-  never driven in this model, so the flies mostly turn in place and jump.
-* **Courtship needs the switches.** See above.
+* **They only walk toward things that move.** LC9 and LC10a respond to
+  objects sweeping across the eye. A fly that sees nothing moving mostly
+  stays put, apart from the occasional twitch.
+* **Arousal is hand-written.** The brains decide what to *do* with arousal
+  (sing, say yes or no), but how arousal rises and falls is my stand-in for
+  dopamine and hormones, which no connectome contains.
+* **Her ears are partly hand-written.** In the simulation, her hearing
+  neurons don't carry song as far as vpoEN, so song drives her song-tuned
+  vpoEN neurons directly, the same way the eyes drive visual feature
+  detectors.
 * **Mating itself is drawn, not simulated.** The brains decide *whether*
   (her vpoDN "yes" vs DNp13 "no", his courtship state). The body code decides
   that a willing pair, with him right behind her, counts as mating.

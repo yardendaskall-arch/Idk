@@ -13,24 +13,28 @@ Nothing in this file decides what a fly does. The code only:
 
   * SENSES: turns the world into spikes in sensory neurons
       - eyes: the cursor and the other fly excite visual neurons
-        (LC4, LPLC2, LC16, LC10a, left and right optic lobe)
+        (LC4, LPLC2, LC16, LC10a, LC9, left and right optic lobe)
       - male forelegs: touching the female excites his pheromone-taste
         neurons (LgLG1, the ppk23 cells)
       - female antennae: the male's song excites her hearing neurons (JO-B)
+        and song-tuned vpoEN neurons
   * BRAIN: runs the spiking network (no behaviour rules inside it),
   * MEMORY: visual synapses weaken with harmless use and strengthen after a
            swat. Saved between runs.
-  * SWITCHES: optional "optogenetics" that switch on the male's P1 courtship
-           neurons or the female's pC1 mating-drive neurons, as scientists do
-           in the lab with light.
+  * AROUSAL: a slow hand-written stand-in for dopamine and hormones (not in
+           any connectome). It rises while a fly senses a partner and drives
+           his P1 courtship / her pC1 mating-drive neurons partway; her mood
+           also wanders and drops after mating. A lab override can force
+           P1 / pC1 fully on, as scientists do with light.
   * BODY: reads out descending neurons and moves the drawing:
              DNp01 (Giant Fiber) -> jump
              DNa02 (left/right)  -> turn toward that side
-             DNp09               -> walk forward
+             DNp09               -> walk forward (driven by LC9: walk to objects)
              MDN                 -> walk backward
              pIP10 (male)        -> sing (wing extension)
              vpoDN (female)      -> accept a male (vaginal plate opening)
              DNp13 (female)      -> reject (ovipositor extrusion)
+           (her yes and no neurons compete; whichever fires more wins)
   * DRAW: paints the flies.
 
 Neuron model: leaky integrate-and-fire with the parameters of Shiu et al.
@@ -70,12 +74,12 @@ import numpy as np
 
 # 1.0 hand-tuned circuit, 2.0 whole-brain simulation, 3.0 memory,
 # 3.1 "what he sees and thinks" view, 3.2 split into three windows,
-# 4.0 female + male flies
-__version__ = "4.0.0"
+# 4.0 female + male flies, 4.1 walking (LC9), arousal, her choice
+__version__ = "4.1.0"
 
 HERE = Path(__file__).resolve().parent
 DATA_DIR = HERE / "brain_data"
-CACHE_FORMAT = 4
+CACHE_FORMAT = 5
 CACHE_FILE = {"female": DATA_DIR / "brain_female_783.npz",
               "male": DATA_DIR / "brain_male_cns09.npz"}
 MEMORY_FILE = {"female": DATA_DIR / "memory_female.npz",
@@ -95,7 +99,7 @@ FEMALE_MEDIAN_INPUT = 218.0  # median synapses onto a FlyWire central neuron
 
 SIDES = ("L", "R")
 ANNOT_SIDE = {"L": "left", "R": "right"}
-SENSORY_TYPES = ("LC4", "LPLC2", "LC16", "LC10a")
+SENSORY_TYPES = ("LC4", "LPLC2", "LC16", "LC10a", "LC9")
 MOTOR_TYPES = ("DNp01", "DNa02", "DNp09", "MDN")
 SENSORY = [f"{t}_{s}" for t in SENSORY_TYPES for s in SIDES]
 MOTOR = [f"{t}_{s}" for t in MOTOR_TYPES for s in SIDES]
@@ -111,8 +115,8 @@ EXTRA_GROUPS = {
              "P1": r"^P1_",                 # courtship command
              "pIP10": r"^pIP10$"},          # courtship song
 }
-SENSE_INPUTS = {"female": ["JO-B"], "male": ["LgLG1"]}
-SWITCH = {"female": "pC1", "male": "P1"}     # optogenetic-style switch
+SENSE_INPUTS = {"female": ["JO-B", "vpoEN"], "male": ["LgLG1"]}
+SWITCH = {"female": "pC1", "male": "P1"}     # driven by arousal (or a lab override)
 ROLE = {"DNp01": "Giant Fiber: jump", "DNa02": "turn to this side",
         "DNp09": "walk forward", "MDN": "walk backward",
         "JO-B": "hearing song", "pC1": "mating drive", "vpoEN": "song → yes",
@@ -520,6 +524,7 @@ def _brain_process(sex, noise, inputs, group_spikes, spike_count, stats, memory,
             stats[1] = sim / max(wall, 1e-6)
             t0, s0 = time.perf_counter(), brain.steps
         stats[0] = brain.total_spikes
+        stats[3] = brain.steps
         if now - last_mem > 0.5:
             mem[:] = [brain.memory_of(g) for g in SENSORY]
             last_mem = now
@@ -544,7 +549,7 @@ class BrainLink:
         self._inputs = ctx.RawArray("d", len(self._input_names))
         self._group_spikes = ctx.RawArray("q", len(self.group_names))
         self._spike_count = ctx.RawArray("i", self.n)
-        self._stats = ctx.RawArray("d", 3)          # total spikes, speed, ready
+        self._stats = ctx.RawArray("d", 4)          # total spikes, speed, ready, steps
         self._memory = ctx.RawArray("d", len(SENSORY))
         self._hurt = ctx.RawValue("i", 0)
         self._stop = ctx.Event()
@@ -582,6 +587,11 @@ class BrainLink:
     def ready(self) -> bool:
         return self._stats[2] > 0
 
+    @property
+    def steps(self) -> int:
+        """Brain time in ms since it started."""
+        return int(self._stats[3])
+
     def stop(self):
         self._stop.set()
         self.proc.join(timeout=5)
@@ -605,6 +615,7 @@ class Eyes:
 
     def __init__(self):
         self._prev_alpha = {}
+        self._prev_bearing = {}
         self.hz = {g: 0.0 for g in SENSORY}
         self.seen = []               # what's in view, for the "what she sees" window
 
@@ -617,6 +628,9 @@ class Eyes:
             prev = self._prev_alpha.get(name, alpha)
             looming = max((alpha - prev) / max(dt, 1e-3), 0.0)    # rad/s
             self._prev_alpha[name] = alpha
+            # How fast it sweeps across the eye (its own motion or the fly's turning)
+            sweep = abs(_wrap(bearing - self._prev_bearing.get(name, bearing))) / max(dt, 1e-3)
+            self._prev_bearing[name] = bearing
 
             visible = _sig((self.BLIND_SPOT - abs(bearing)) / 0.05)
             left = _sig(bearing / 0.35)            # binocular overlap in front
@@ -628,7 +642,9 @@ class Eyes:
                 "LC16": _clamp(frontal ** 2 * _sig((alpha - 0.18) / 0.05)
                                * (0.4 + 0.6 * _clamp(looming * 2))),    # frontal approach
                 "LC10a": _clamp(_sig((0.25 - alpha) / 0.05)
-                                * _clamp(speed / 400)),                 # small moving object
+                                * _clamp(sweep / 1.2)),                 # small moving object
+                "LC9": _clamp(_sig((0.3 - alpha) / 0.06)
+                              * _clamp(sweep / 1.2)),                   # small object
             }
             for g in SENSORY:
                 ctype, side = g.rsplit("_", 1)
@@ -650,23 +666,29 @@ class Body:
     BACK_PER_HZ = 3.0        # px/s per Hz of MDN
     JUMP_HZ = 25.0           # Giant Fiber rate that launches a jump
     SING_HZ = 30.0           # pIP10 rate that extends a wing (male song)
-    OPEN_HZ = 25.0           # vpoDN rate that opens the vaginal plate (female)
-    REJECT_HZ = 25.0         # DNp13 rate that extrudes the ovipositor (female)
+    OPEN_HZ = 20.0           # vpoDN rate that opens the vaginal plate (female)
+    REJECT_HZ = 12.0         # DNp13 rate that extrudes the ovipositor (female)
 
     def __init__(self, brain):
         self.brain = brain
         self.names = brain.group_names
         self.hz = {g: 0.0 for g in self.names}
         self._last = brain.group_spikes.copy()
+        self._last_steps = brain.steps
 
     def read(self, dt: float) -> dict:
-        now = self.brain.group_spikes.copy()
-        rates = (now - self._last) / self.brain.group_size / max(dt, 1e-3)
-        self._last = now
-        for i, g in enumerate(self.names):
-            tau = 0.05 if g.startswith("DNp01") else 0.15
-            a = min(dt / tau, 1.0)
-            self.hz[g] += a * (rates[i] - self.hz[g])
+        # Rates per second of *brain* time, so a brain running slower than
+        # real time still reports its true firing rates.
+        steps = self.brain.steps
+        brain_dt = (steps - self._last_steps) * WholeBrain.DT / 1000
+        if brain_dt > 0:
+            now = self.brain.group_spikes.copy()
+            rates = (now - self._last) / self.brain.group_size / brain_dt
+            self._last, self._last_steps = now, steps
+            for i, g in enumerate(self.names):
+                tau = 0.05 if g.startswith("DNp01") else 0.15
+                a = min(brain_dt / tau, 1.0)
+                self.hz[g] += a * (rates[i] - self.hz[g])
         h = self.hz
         return {
             "turn": self.TURN_PER_HZ * (h["DNa02_L"] - h["DNa02_R"]),   # + = left
@@ -674,9 +696,65 @@ class Body:
                       - self.BACK_PER_HZ * (h["MDN_L"] + h["MDN_R"]) / 2),
             "jump": max(h["DNp01_L"], h["DNp01_R"]) > self.JUMP_HZ,
             "sing": h.get("pIP10", 0.0) > self.SING_HZ,
-            "open": h.get("vpoDN", 0.0) > self.OPEN_HZ,
-            "reject": h.get("DNp13", 0.0) > self.REJECT_HZ,
+            # Her yes (vpoDN) and no (DNp13) neurons compete; the stronger wins.
+            "open": (h.get("vpoDN", 0.0) > self.OPEN_HZ
+                     and h.get("vpoDN", 0.0) > 1.2 * h.get("DNp13", 0.0)),
+            "reject": (h.get("DNp13", 0.0) > self.REJECT_HZ
+                       and h.get("DNp13", 0.0) >= h.get("vpoDN", 0.0)),
         }
+
+
+# --------------------------------------------------------------------------- #
+#  Arousal: the slow internal state the connectome doesn't contain
+# --------------------------------------------------------------------------- #
+
+class Arousal:
+    """A hand-written stand-in for dopamine and hormones.
+
+    In real flies, P1 (male courtship) and pC1 (female mating drive) are set
+    by slow signals - dopamine, hormones, and whether the fly has just mated -
+    that build up over seconds to minutes. The connectome only has fast
+    synapses, and in the simulation neither P1 nor pC1 switches on from the
+    senses alone. So each fly gets one slow number, 0..1, that rises while it
+    senses a partner and fades otherwise, and drives P1 / pC1 partway. What
+    happens next (singing, saying yes or no) is up to the simulated brain.
+    """
+
+    P1_HZ = 60.0        # male: P1 rate at full arousal
+    PC1_HZ = 50.0       # female: pC1 rate at full arousal and best mood
+
+    def __init__(self, sex: str):
+        self.sex = sex
+        self.level = 0.0
+        # Female only: a slowly wandering willingness to mate, different each run.
+        self.mood = random.uniform(0.2, 0.9)
+        self.mated_at = -1e9
+
+    def update(self, dt: float, now: float, cue: float):
+        """cue 0..1: how strongly the fly senses a partner right now."""
+        if self.sex == "male":
+            sated = now - self.mated_at < 60           # males rest after mating
+            rise = 0.0 if sated else 0.5 * cue * (1 - self.level)
+            self.level += (rise - self.level / 30) * dt
+        else:
+            self.level += (0.4 * cue * (1 - self.level) - self.level / 40) * dt
+            # Mood drifts around 0.5 over minutes; after mating it drops to 0
+            # (real mated females reject males for days, here for minutes).
+            self.mood += ((0.5 - self.mood) * dt / 90
+                          + random.gauss(0, 0.2 * math.sqrt(2 * dt / 90)))
+        self.level = _clamp(self.level)
+        self.mood = _clamp(self.mood)
+
+    def just_mated(self, now: float):
+        self.mated_at = now
+        self.level = 0.0
+        if self.sex == "female":
+            self.mood = 0.0
+
+    def drive_hz(self) -> float:
+        if self.sex == "male":
+            return self.P1_HZ * self.level
+        return self.PC1_HZ * self.mood * self.level
 
 
 # --------------------------------------------------------------------------- #
@@ -715,7 +793,8 @@ class Fly:
         self.swatted_at = 0.0
         self._press = None
         self.dragging = False
-        self.switch_on = tk.BooleanVar(value=False)
+        self.switch_on = tk.BooleanVar(value=False)    # lab override
+        self.arousal = Arousal(sex)
 
         self.win = tk.Toplevel(app.root)
         self.win.title(f"Connectome Fly v{__version__} ({sex})")
@@ -738,10 +817,9 @@ class Fly:
         self.menu.add_command(label="Open all three",
                               command=lambda: app.open_all_windows(self))
         self.menu.add_separator()
-        switch = SWITCH[sex]
-        why = "mating drive" if sex == "female" else "courtship"
-        self.menu.add_checkbutton(label=f"Switch on {self.his} {switch} neurons ({why})",
-                                  variable=self.switch_on)
+        self.menu.add_checkbutton(
+            label=f"Lab override: force {self.his} {SWITCH[sex]} neurons on",
+            variable=self.switch_on)
         self.menu.add_separator()
         self.menu.add_command(label="Pause / resume", command=app.toggle_pause)
         self.menu.add_command(label="Quit", command=app.quit)
@@ -789,10 +867,11 @@ class Fly:
             objects.append((name, math.hypot(dx, dy), bearing, radius, speed))
         hz = dict(self.eyes.see(objects, dt))
         if self.sex == "female":
-            hz["JO-B"] = 150.0 * self.hearing
+            hz["JO-B"] = 150.0 * self.hearing     # antennal hearing neurons
+            hz["vpoEN"] = 60.0 * self.hearing     # song-tuned neurons (Wang et al. 2021)
         else:
             hz["LgLG1"] = 120.0 * self.taste
-        hz[SWITCH[self.sex]] = 100.0 if self.switch_on.get() else 0.0
+        hz[SWITCH[self.sex]] = 100.0 if self.switch_on.get() else self.arousal.drive_hz()
         self.brain.set_inputs(hz)
         self.motor = self.body.read(dt)
 
@@ -1060,7 +1139,7 @@ class App:
         cursor_speed = math.hypot(cx - lx, cy - ly) / max(dt, 1e-3)
         self._last_cursor = (cx, cy)
         if not self.paused:
-            self._between_flies(now)
+            self._between_flies(now, dt)
             for f in self.flies:
                 if f.brain.ready:
                     f.sense(dt, (cx, cy), cursor_speed, [o for o in self.flies if o is not f])
@@ -1075,20 +1154,33 @@ class App:
     def _is_mating(self, fly) -> bool:
         return bool(self.mating) and fly in self.mating[:2]
 
-    def _between_flies(self, now: float):
-        """The senses that connect the two flies (touch/taste and song)."""
+    def _between_flies(self, now: float, dt: float):
+        """The senses that connect the two flies (sight, touch/taste, song),
+        and the slow arousal each builds up from sensing the other."""
         m, f = self.fly("male"), self.fly("female")
         if not (m and f):
+            for fly in self.flies:
+                fly.arousal.update(dt, now, 0.0)
             return
         hx, hy = m.head()
         # His forelegs taste her if his head touches her body.
         m.taste = 1.0 if math.hypot(hx - f.x, hy - f.y) < 16 * f.scale else 0.0
         # She hears his song if he's close: fruit fly song is near-field sound.
         d = math.hypot(m.x - f.x, m.y - f.y)
-        loud = _clamp((m.body.hz["pIP10"] - 10) / 60) * _clamp((220 - d) / 160)
+        loud = _clamp((m.body.hz["pIP10"] - 10) / 60) * _clamp((300 - d) / 200)
         f.hearing = loud
         bearing = _wrap(m.heading - math.atan2(f.y - m.y, f.x - m.x))
         m.sing_side = 1 if bearing > 0 else -1
+
+        # His arousal rises while he sees her nearby (real males also smell
+        # her) and more when he tastes her; hers rises while she hears song.
+        sees_her = (abs(bearing) < Eyes.BLIND_SPOT) * _clamp((600 - d) / 400)
+        m.arousal.update(dt, now, _clamp(0.6 * sees_her + m.taste))
+        f.arousal.update(dt, now, f.hearing)
+        # Being rejected (she extrudes her ovipositor at him) dampens his
+        # arousal - real males learn from rejection too.
+        if f.motor["reject"] and d < 80:
+            m.arousal.level *= 1 - 0.3 * dt
 
     def _update_mating(self, now: float):
         m, f = self.fly("male"), self.fly("female")
@@ -1098,6 +1190,8 @@ class App:
             if now > self.mating[2]:                 # done: separate
                 self.mating = None
                 f.mated_until = now + self.REMATING_PAUSE
+                m.arousal.just_mated(now)
+                f.arousal.just_mated(now)
                 m.heading = _wrap(m.heading + math.pi)
                 m.x -= math.cos(f.heading) * 30
                 m.y -= math.sin(f.heading) * 30
@@ -1129,9 +1223,9 @@ class App:
             spots = {"eyes": (self.sw - 548, 20), "brain": (560, 470),
                      "neurons": (self.sw - 488, 390)}
         return {
-            "eyes": (f"What {fly.he} sees", 520, 322, self._draw_eyes, spots["eyes"]),
+            "eyes": (f"What {fly.he} sees", 520, 342, self._draw_eyes, spots["eyes"]),
             "brain": (f"{His} brain", 680, 420, self._draw_brain, spots["brain"]),
-            "neurons": (f"What {fly.he}'s doing", 460, 520, self._draw_neurons,
+            "neurons": (f"What {fly.he}'s doing", 460, 540, self._draw_neurons,
                         spots["neurons"]),
         }
 
@@ -1224,9 +1318,8 @@ class App:
                 g = f"{ctype}_{side}"
                 self._bar(c, 10 + 260 * j, y, ctype, fly.brain.input_hz[g], "#4aa3df",
                           label_w=50, bar_w=110)
-        t(c, 10, 296,
-          "LC4 fast looming · LPLC2 collision · LC16 approach · LC10a small moving object",
-          "#6d7785", 8)
+        t(c, 10, 316, "LC4 fast looming · LPLC2 collision · LC16 approach · "
+                      "LC10a / LC9 small moving object", "#6d7785", 8)
 
     # -- window 2: the whole brain ---------------------------------------------
     def _setup_brain_map(self, canvas, fly) -> dict:
@@ -1310,11 +1403,18 @@ class App:
             self._bar(c, 10, yy, g, fly.body.hz[g], "#c77ddb", label_w=80, bar_w=130)
             t(c, 450, yy, ROLE[g], "#6d7785", 8, right=True)
         y += 22 + len(EXTRA_GROUPS[fly.sex]) * 22 + 4
-        switch = SWITCH[fly.sex]
-        state = "ON" if fly.switch_on.get() else "off"
-        t(c, 10, y, f"{switch} switch (right-click the fly): {state}", "#8a93a0", 8)
+        a = fly.arousal
+        if fly.switch_on.get():
+            line = f"Lab override ON: {SWITCH[fly.sex]} forced on"
+        elif fly.sex == "male":
+            line = f"Arousal {a.level:.2f} → P1 at {a.drive_hz():.0f} Hz"
+        else:
+            line = f"Arousal {a.level:.2f} · mood {a.mood:.2f} → pC1 at {a.drive_hz():.0f} Hz"
+        t(c, 10, y, line, "#f2d16b", 9)
+        t(c, 10, y + 16, "(arousal stands in for dopamine and hormones, which the "
+                         "connectome doesn't contain)", "#6d7785", 8)
 
-        y = 420
+        y = 440
         t(c, 10, y, "Memory (visual synapse strength)", "#e6e9ee", 10, True)
         mem = "   ".join(
             f"{ct} {(fly.brain.memory_of(f'{ct}_L') + fly.brain.memory_of(f'{ct}_R')) / 2:.2f}x"
@@ -1336,7 +1436,8 @@ def simulate(sex: str, seconds: float, noise: float):
     while t < seconds:
         dist = max(700 - 300 * max(t - 1.0, 0), 10)     # 1 s still, then approach
         speed = 300 if t > 1.0 else 0
-        brain.input_hz.update(eyes.see([("cursor", dist, 0.6, 14.0, speed)], frame))
+        bearing = 0.6 + (0.4 * math.sin(3 * t) if t > 1.0 else 0)   # weaving
+        brain.input_hz.update(eyes.see([("cursor", dist, bearing, 14.0, speed)], frame))
         for _ in range(int(frame * 1000)):
             brain.step()
         motor = body.read(frame)
