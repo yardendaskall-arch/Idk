@@ -90,6 +90,10 @@ Tkinter ships with most Python installs (on Debian/Ubuntu:
 connectome data into `brain_data/` and builds the brain, which takes about a
 minute. After that it starts in a few seconds. No FlyWire token is needed.
 
+To check which version you have, run `python fly_pet.py --version`. The
+version is also printed at startup and shown at the top of the brain panel.
+The current version is **3.0.0**.
+
 Options:
 
 ```bash

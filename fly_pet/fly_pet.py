@@ -55,6 +55,9 @@ from pathlib import Path
 
 import numpy as np
 
+# 1.0 hand-tuned circuit, 2.0 whole-brain simulation, 3.0 memory
+__version__ = "3.0.0"
+
 HERE = Path(__file__).resolve().parent
 DATA_DIR = HERE / "brain_data"
 CACHE_FILE = DATA_DIR / "brain_783.npz"
@@ -444,7 +447,7 @@ class FlyPet:
         self.body = Body(brain)
 
         self.root = tk.Tk()
-        self.root.title("Connectome Fly")
+        self.root.title(f"Connectome Fly v{__version__}")
         self.root.overrideredirect(True)
         self.root.wm_attributes("-topmost", True)
         bg = self._setup_transparency()
@@ -679,7 +682,8 @@ class FlyPet:
             self._panel_last = (t, spikes)
         rate = getattr(self, "_panel_rate", 0.0)
         c.create_text(10, 8, anchor="nw", fill="#9aa4b2", font=("TkDefaultFont", 9),
-                      text=f"FlyWire 783 whole brain: {self.brain.n:,} spiking neurons")
+                      text=f"Connectome Fly v{__version__}  ·  {self.brain.n:,} spiking "
+                           "neurons (FlyWire 783)")
         c.create_text(10, 24, anchor="nw", fill="#9aa4b2", font=("TkDefaultFont", 9),
                       text=f"{rate:,.0f} spikes/s   brain speed {self.brain.speed:.2f}x real time")
 
@@ -745,6 +749,8 @@ def simulate(brain: WholeBrain, seconds: float):
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--version", action="version",
+                    version=f"Connectome Fly {__version__}")
     ap.add_argument("--noise", type=float, default=0.05,
                     help="random synaptic events per neuron per ms (default 0.05)")
     ap.add_argument("--rebuild", action="store_true",
@@ -753,6 +759,7 @@ def main():
                     help="run without a window and print the brain's output")
     args = ap.parse_args()
 
+    print(f"Connectome Fly v{__version__}")
     data = load_brain_data(rebuild=args.rebuild)
     brain = WholeBrain(data, noise=args.noise)
     print(f"[brain] {brain.n:,} neurons, {len(brain.indices):,} connections, "
