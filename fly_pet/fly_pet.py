@@ -55,8 +55,9 @@ from pathlib import Path
 
 import numpy as np
 
-# 1.0 hand-tuned circuit, 2.0 whole-brain simulation, 3.0 memory
-__version__ = "3.0.0"
+# 1.0 hand-tuned circuit, 2.0 whole-brain simulation, 3.0 memory,
+# 3.1 "what he sees and thinks" view
+__version__ = "3.1.0"
 
 HERE = Path(__file__).resolve().parent
 DATA_DIR = HERE / "brain_data"
@@ -104,7 +105,7 @@ def _download(url: str, dest: Path):
 def _load_annotations():
     """FlyWire cell types / sides / neurotransmitters, via fafbseg if possible."""
     import pandas as pd
-    cols = ["root_id", "cell_type", "side", "super_class", "top_nt"]
+    cols = ["root_id", "cell_type", "side", "super_class", "top_nt", "pos_x", "pos_y"]
     try:
         from fafbseg import flywire
         ann = flywire.get_hierarchical_annotations(verbose=False)
@@ -159,6 +160,8 @@ def build_brain_cache():
              indices=W.indices.astype(np.int32), data=W.data.astype(np.float32),
              sensory=np.flatnonzero(sensory), n=n, root_ids=root_ids,
              visual=np.flatnonzero((ann.super_class == "visual_projection").to_numpy()),
+             pos=np.stack([ann.pos_x.to_numpy(np.float32), ann.pos_y.to_numpy(np.float32)], 1),
+             left_x=np.float32(np.nanmean(ann.pos_x[ann.side == "left"])),
              **{f"group_{g}": idx for g, idx in groups.items()})
     print(f"[data] saved {CACHE_FILE.name}: {n:,} neurons, {W.nnz:,} connections")
 
@@ -166,14 +169,14 @@ def build_brain_cache():
 def load_brain_data(rebuild: bool = False) -> dict:
     if not rebuild and CACHE_FILE.exists():
         with np.load(CACHE_FILE) as z:
-            rebuild = "visual" not in z.files       # cache from an older version
+            rebuild = "pos" not in z.files          # cache from an older version
     if rebuild or not CACHE_FILE.exists():
         build_brain_cache()
     z = np.load(CACHE_FILE)
     return {
         "n": int(z["n"]), "indptr": z["indptr"], "indices": z["indices"],
         "data": z["data"], "sensory": z["sensory"], "visual": z["visual"],
-        "root_ids": z["root_ids"],
+        "root_ids": z["root_ids"], "pos": z["pos"], "left_x": float(z["left_x"]),
         "groups": {g: z[f"group_{g}"] for g in GROUPS},
     }
 
@@ -247,6 +250,8 @@ class WholeBrain:
         # Cumulative counters, read by the body without locking.
         self.group_spikes = np.zeros(len(GROUPS), np.int64)
         self.total_spikes = 0
+        self.spike_count = np.zeros(n, np.int32)       # per neuron, for the brain map
+        self.pos, self.left_x = data["pos"], data["left_x"]
         self.steps = 0
         self.speed = 1.0                   # brain time / wall time
         self._running = False
@@ -293,6 +298,7 @@ class WholeBrain:
             if len(g):
                 self.group_spikes += np.bincount(g, minlength=len(GROUPS))
         self.total_spikes += len(s)
+        self.spike_count[s] += 1
         self.steps += 1
         if self.steps % 100 == 0:
             self._update_memory(0.1)
@@ -369,9 +375,13 @@ class Eyes:
     MAX_HZ = 150.0
     OBJECT_RADIUS = 14.0   # px, the cursor is seen as a small dark object
 
+    BLIND_SPOT = math.radians(165)   # can't see further back than this
+
     def __init__(self):
         self._prev_alpha = None
         self.hz = {g: 0.0 for g in SENSORY}
+        self.bearing = self.alpha = self.looming = self.speed = 0.0
+        self.visible = 0.0
 
     def see(self, dist: float, bearing: float, dt: float, cursor_speed: float):
         """dist in px; bearing in rad, 0 = ahead, + = fly's left."""
@@ -381,8 +391,11 @@ class Eyes:
         looming = max((alpha - self._prev_alpha) / max(dt, 1e-3), 0.0)  # rad/s
         self._prev_alpha = alpha
 
+        visible = _sig((self.BLIND_SPOT - abs(bearing)) / 0.05)
         left = _sig(bearing / 0.35)            # binocular overlap in front
-        field = {"L": left, "R": 1.0 - left}
+        field = {"L": left * visible, "R": (1.0 - left) * visible}
+        self.bearing, self.alpha, self.looming = bearing, alpha, looming
+        self.speed, self.visible = cursor_speed, visible
         frontal = max(math.cos(bearing), 0.0)
         feature = {
             "LC4": _clamp((looming - 0.4) / 2.5),                   # fast expansion
@@ -468,7 +481,7 @@ class FlyPet:
         self._last_cursor = self.root.winfo_pointerxy()
 
         self.menu = tk.Menu(self.root, tearoff=0)
-        self.menu.add_command(label="Show brain activity", command=self.toggle_panel)
+        self.menu.add_command(label="See what he sees and thinks", command=self.toggle_panel)
         self.menu.add_command(label="Pause / resume", command=self.toggle_pause)
         self.menu.add_separator()
         self.menu.add_command(label="Quit", command=self.quit)
@@ -655,7 +668,10 @@ class FlyPet:
             c.create_oval(x - 30, y - 30, x + 30, y + 30, outline="#f2b705", width=2)
 
 
-    # ------------------------------------------------------ brain activity UI
+    # ------------------------------------------- "what he sees and thinks" view
+    PANEL_W = 460
+    MAP_W, MAP_H = 440, 210          # brain map size (px)
+
     def toggle_panel(self):
         tk = self.tk
         if self.panel:
@@ -663,54 +679,175 @@ class FlyPet:
             self.panel = None
             return
         self.panel = tk.Toplevel(self.root)
-        self.panel.title("Fly brain activity")
+        self.panel.title(f"Connectome Fly v{__version__} - what he sees and thinks")
         self.panel.wm_attributes("-topmost", True)
         self.panel.protocol("WM_DELETE_WINDOW", self.toggle_panel)
         self.panel.configure(bg="#14161a")
-        self.pcanvas = tk.Canvas(self.panel, width=440, height=330, bg="#14161a",
-                                 highlightthickness=0)
-        self.pcanvas.pack(padx=8, pady=8)
+        self.pcanvas = tk.Canvas(self.panel, width=self.PANEL_W, height=720,
+                                 bg="#14161a", highlightthickness=0)
+        self.pcanvas.pack(padx=4, pady=4)
         self._panel_last = (time.perf_counter(), self.brain.total_spikes)
+        self._setup_brain_map()
+
+    def _setup_brain_map(self):
+        """Pixel position of every neuron in a front view of the brain."""
+        w, h = self.MAP_W // 2, self.MAP_H // 2        # draw at half size, then 2x
+        pos = self.brain.pos
+        ok = ~np.isnan(pos).any(1)
+        x, y = pos[:, 0], pos[:, 1]
+        x0, x1 = np.nanmin(x), np.nanmax(x)
+        y0, y1 = np.nanmin(y), np.nanmax(y)
+        px = ((x - x0) / (x1 - x0) * (w - 1))
+        if self.brain.left_x > (x0 + x1) / 2:          # fly's left on the left
+            px = (w - 1) - px
+        py = (y - y0) / (y1 - y0) * (h - 1)
+        self._map_ok = np.flatnonzero(ok)
+        self._map_pix = (np.nan_to_num(py[ok]).astype(int) * w
+                         + np.nan_to_num(px[ok]).astype(int))
+        density = np.bincount(self._map_pix, minlength=w * h).astype(np.float32)
+        self._map_bg = (np.log1p(density) / np.log1p(density.max()) * 70).astype(np.float32)
+        self._map_act = np.zeros(w * h, np.float32)
+        self._map_last = self.brain.spike_count.copy()
+        self._map_time = 0.0
+        self._photo = self.tk.PhotoImage(width=self.MAP_W, height=self.MAP_H)
+        self._map_item = self.pcanvas.create_image(10, 204, anchor="nw", image=self._photo)
+
+    def _update_brain_map(self):
+        w, h = self.MAP_W // 2, self.MAP_H // 2
+        counts = self.brain.spike_count.copy()
+        new = (counts - self._map_last)[self._map_ok]
+        self._map_last = counts
+        self._map_act *= 0.6                                    # glow fades
+        self._map_act += np.bincount(self._map_pix, weights=new, minlength=w * h)
+        heat = 1 - np.exp(-self._map_act / 1.5)                  # 0..1
+        r = np.clip(self._map_bg + heat * 3 * 255, 0, 255)
+        g = np.clip(self._map_bg + (heat * 3 - 1) * 255, 0, 255)
+        b = np.clip(self._map_bg * 1.3 + (heat * 3 - 2) * 255, 0, 255)
+        img = np.stack([r, g, b], 1).astype(np.uint8).reshape(h, w, 3)
+        img = img.repeat(2, 0).repeat(2, 1)
+        header = f"P6 {self.MAP_W} {self.MAP_H} 255 ".encode()
+        self._photo.configure(data=header + img.tobytes(), format="PPM")
 
     def update_panel(self):
         c = self.pcanvas
-        c.delete("all")
+        c.delete("dyn")
         t, spikes = time.perf_counter(), self.brain.total_spikes
         t0, s0 = self._panel_last
         if t - t0 > 0.5:
             self._panel_rate = (spikes - s0) / (t - t0)
             self._panel_last = (t, spikes)
         rate = getattr(self, "_panel_rate", 0.0)
-        c.create_text(10, 8, anchor="nw", fill="#9aa4b2", font=("TkDefaultFont", 9),
-                      text=f"Connectome Fly v{__version__}  ·  {self.brain.n:,} spiking "
-                           "neurons (FlyWire 783)")
-        c.create_text(10, 24, anchor="nw", fill="#9aa4b2", font=("TkDefaultFont", 9),
-                      text=f"{rate:,.0f} spikes/s   brain speed {self.brain.speed:.2f}x real time")
 
+        def text(x, y, s, colour="#c6ccd6", size=9, bold=False, justify="left"):
+            font = ("TkDefaultFont", size, "bold") if bold else ("TkDefaultFont", size)
+            c.create_text(x, y, anchor="ne" if justify == "right" else "nw", fill=colour,
+                          font=font, text=s, tags="dyn")
+
+        text(10, 6, f"Connectome Fly v{__version__}  ·  {self.brain.n:,} spiking neurons "
+                    f"(FlyWire 783)", "#9aa4b2")
+        text(10, 22, f"{rate:,.0f} spikes/s   brain speed {self.brain.speed:.2f}x real time",
+             "#9aa4b2")
+
+        # -- what he sees: his panoramic field of view -------------------------
+        text(10, 44, "What he sees", "#e6e9ee", 10, True)
+        e = self.eyes
+        x0, x1, y0, y1 = 10, 450, 66, 116
+        cx, half = (x0 + x1) / 2, (x1 - x0) / 2
+
+        def bx(bearing):  # bearing (+ = his left) -> x, his left on the left
+            return cx - bearing / math.pi * half
+
+        c.create_rectangle(x0, y0, x1, y1, fill="#1d232b", outline="#3a404a", tags="dyn")
+        for sgn in (1, -1):                                   # blind spot behind
+            a, b = sorted((bx(sgn * Eyes.BLIND_SPOT), bx(sgn * math.pi)))
+            c.create_rectangle(a, y0, b, y1, fill="#0c0e11", outline="", tags="dyn")
+        a, b = sorted((bx(0.35), bx(-0.35)))                  # both eyes overlap
+        c.create_rectangle(a, y0, b, y1, fill="#23303b", outline="", tags="dyn")
+        c.create_line(cx, y0, cx, y1, fill="#3a404a", dash=(2, 3), tags="dyn")
+        text(x0 + 4, y0 + 2, "left eye", "#6d7785", 8)
+        text(x1 - 4, y0 + 2, "right eye", "#6d7785", 8, justify="right")
+        text(cx - 14, y1 + 2, "ahead", "#6d7785", 8)
+        text(x0, y1 + 2, "behind", "#6d7785", 8)
+        text(x1, y1 + 2, "behind", "#6d7785", 8, justify="right")
+        if e.visible > 0.1:
+            r = max(e.alpha / math.pi * half / 2, 2.5)
+            ox, oy = bx(e.bearing), (y0 + y1) / 2
+            colour = "#ff5a4f" if e.looming > 0.4 else "#f2f2f2"
+            c.create_oval(ox - r, oy - min(r, 24), ox + r, oy + min(r, 24),
+                          fill=colour, outline="", tags="dyn")
+        text(10, 136, self.describe_sight(), "#9fd3ff")
+
+        # -- what he's thinking: the whole brain, live ------------------------
+        text(10, 160, "What his brain is doing", "#e6e9ee", 10, True)
+        text(10, 178, "each dot is one neuron, viewed from behind his head · bright = firing",
+             "#6d7785", 8)
+        text(14, 190, "left eye", "#6d7785", 8)
+        text(446, 190, "right eye", "#6d7785", 8, justify="right")
+        self._map_time += 1
+        if self._map_time % 3 == 0:                            # ~13 updates/s
+            self._update_brain_map()
+        text(10, 422, self.describe_thought(), "#f2d16b", 10, True)
+
+        # -- the neurons that connect eyes and body --------------------------
         def bars(title, names, hz, x, colour):
-            c.create_text(x, 48, anchor="nw", fill="#e6e9ee",
-                          font=("TkDefaultFont", 10, "bold"), text=title)
+            text(x, 450, title, "#e6e9ee", 10, True)
             for i, n in enumerate(names):
-                y = 70 + i * 24
-                c.create_text(x, y, anchor="nw", fill="#c6ccd6",
-                              font=("TkDefaultFont", 9), text=n)
-                c.create_rectangle(x + 70, y + 2, x + 170, y + 14, outline="#3a404a")
+                y = 472 + i * 22
+                text(x, y, n)
+                c.create_rectangle(x + 70, y + 2, x + 170, y + 14, outline="#3a404a",
+                                   tags="dyn")
                 c.create_rectangle(x + 70, y + 2, x + 70 + 100 * min(hz[n] / 150, 1),
-                                   y + 14, fill=colour, width=0)
-                c.create_text(x + 175, y, anchor="nw", fill="#8a93a0",
-                              font=("TkDefaultFont", 8), text=f"{hz[n]:.0f}")
+                                   y + 14, fill=colour, width=0, tags="dyn")
+                text(x + 175, y, f"{hz[n]:.0f}", "#8a93a0", 8)
 
         bars("Eyes (Hz)", SENSORY, self.brain.input_hz, 10, "#4aa3df")
-        bars("Descending (Hz)", MOTOR, self.body.hz, 230, "#e0864a")
+        bars("Descending (Hz)", MOTOR, self.body.hz, 240, "#e0864a")
 
-        mem = "   ".join(f"{t} {self.brain.memory_of(f'{t}_L') * 0.5 + self.brain.memory_of(f'{t}_R') * 0.5:.2f}x"
-                         for t in SENSORY_TYPES)
-        c.create_text(10, 272, anchor="nw", fill="#e6e9ee",
-                      font=("TkDefaultFont", 10, "bold"), text="Memory (visual synapse strength)")
-        c.create_text(10, 292, anchor="nw", fill="#f2d16b", font=("TkDefaultFont", 9),
-                      text=mem)
-        c.create_text(10, 310, anchor="nw", fill="#8a93a0", font=("TkDefaultFont", 8),
-                      text="below 1 = getting used to you   above 1 = wary (swatted)")
+        mem = "   ".join(
+            f"{t} {(self.brain.memory_of(f'{t}_L') + self.brain.memory_of(f'{t}_R')) / 2:.2f}x"
+            for t in SENSORY_TYPES)
+        text(10, 656, "Memory (visual synapse strength)", "#e6e9ee", 10, True)
+        text(10, 676, mem, "#f2d16b")
+        text(10, 694, "below 1 = getting used to you   above 1 = wary (swatted)",
+             "#8a93a0", 8)
+
+    def describe_sight(self) -> str:
+        e = self.eyes
+        if e.visible < 0.1:
+            return "The cursor is behind him, in his blind spot."
+        deg = math.degrees(e.bearing)
+        where = ("straight ahead" if abs(deg) < 15 else
+                 f"{abs(deg):.0f}° to his {'left' if deg > 0 else 'right'}")
+        size = math.degrees(e.alpha)
+        if e.looming > 1.0:
+            return f"Something is rushing at him, {where}! ({size:.0f}° wide and growing)"
+        if e.looming > 0.2:
+            return f"Something is coming closer, {where} ({size:.0f}° wide)."
+        if e.speed > 40:
+            return f"A small object is moving, {where} ({size:.0f}° wide)."
+        return f"A still object, {where} ({size:.0f}° wide)."
+
+    def describe_thought(self) -> str:
+        """Plain words for what his descending (command) neurons are doing."""
+        h = self.body.hz
+        gf = max(h["DNp01_L"], h["DNp01_R"])
+        turn = h["DNa02_L"] - h["DNa02_R"]
+        back = (h["MDN_L"] + h["MDN_R"]) / 2
+        fwd = (h["DNp09_L"] + h["DNp09_R"]) / 2
+        if self.jump or gf > Body.JUMP_HZ:
+            return "Escape! His Giant Fiber is firing - jumping away."
+        parts = []
+        if gf > Body.JUMP_HZ / 3:
+            parts.append("getting nervous (Giant Fiber charging)")
+        if abs(turn) > 8:
+            parts.append(f"turning {'left' if turn > 0 else 'right'} (DNa02)")
+        if back > 8:
+            parts.append("backing away (MDN)")
+        if fwd > 8:
+            parts.append("walking forward (DNp09)")
+        if not parts:
+            return "Resting - his command neurons are quiet."
+        return "He's " + ", ".join(parts) + "."
 
     def run(self):
         self.root.mainloop()
