@@ -1,4 +1,5 @@
-fafbseg>=3.0
-navis>=1.5
-networkx
+numpy
+scipy
 pandas
+pyarrow
+fafbseg>=3.0

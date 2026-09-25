@@ -1,87 +1,104 @@
 # Connectome Fly 🪰
 
-A small desktop pet: a fruit fly that walks around on top of your other windows
-and reacts to your mouse cursor. Its "brain" is a small circuit taken from the
-[FlyWire](https://flywire.ai) whole-brain connectome of *Drosophila*.
+A desktop pet fruit fly whose behaviour comes from a simulation of its **whole
+brain**. All 138,639 neurons in the [FlyWire](https://flywire.ai) connectome
+(public release 783) are simulated as spiking neurons, wired with every
+synapse between them. There are no behaviour rules in the code: no "if the
+cursor is close, jump". The fly turns, walks and jumps only when the
+corresponding neurons in its simulated brain fire.
 
 ```
-cursor ──► visual projection neurons ──► (interneurons) ──► descending neurons ──► behaviour
-           LC4, LPLC2, LC16, LC10a                           DNp01 (Giant Fiber)   escape jump
-           (left + right optic lobe)                         DNa02                 turn
-                                                             MDN                   walk backward
-                                                             DNp09                 walk forward
+EYES (code)                 BRAIN (connectome)                  BODY (code)
+cursor → spikes in     →    138,639 spiking neurons,     →     descending neurons
+LC4, LPLC2, LC16, LC10a     14 million connections              DNp01 (Giant Fiber) → jump
+(left & right eye)          (FlyWire 783)                       DNa02 left/right   → turn
+                                                                DNp09              → walk forward
+                                                                MDN                → walk backward
 ```
 
-* **Far, moving cursor**: LC10a (small-object detector) → DNa02/DNp09. The fly turns toward it and follows it.
-* **Cursor in front, getting closer**: LC16 → MDN. The fly backs away ("moonwalks").
-* **Cursor rushing in**: LC4/LPLC2 (looming detectors) → DNp01, the Giant Fiber. The fly jumps away.
-* **Cursor touching the fly**: a mechanosensory "touch" input drives the Giant Fiber directly.
-* **Nothing happening**: the fly wanders around on its own.
+The only hand-written parts are the two ends:
 
-Right-click the fly for a menu. **Show brain activity** opens a live panel with
-the firing rate of every sensory and descending neuron group and the path the
-signal is currently taking (with a FlyWire circuit this includes the relay
-interneurons, e.g. `LPLC2_R -> <interneuron> (7205…) -> DNp01_R`).
-Use **Quit** in the menu to close it.
+* **Eyes**: how the cursor becomes spikes in four types of visual neuron. This
+  stands in for the retina and optic lobe, which aren't simulated from pixels.
+* **Body**: how descending neuron firing becomes movement. The fly's nerve
+  cord and legs are not part of the brain connectome.
 
-## Install
+## What it does
+
+These behaviours come out of the wiring. None of them are programmed:
+
+* **A cursor moving nearby** excites LC10a (small-object neurons), which
+  drives DNa02 on the same side. The fly turns to face your cursor and
+  follows it as it moves around.
+* **A cursor rushing at it** excites LC4 and LPLC2 (looming detectors), which
+  drive the Giant Fiber to 100–270 Hz. The fly jumps, and DNa02 on the far
+  side tilts the take-off away from you.
+* **Left alone**, weak random synaptic activity gives the occasional
+  spontaneous twitch or turn.
+
+Right-click the fly and choose **Show brain activity** for live firing rates
+of the visual and descending neurons, total spikes per second, and how fast
+the brain is running compared with real time. Choose **Quit** to close it.
+
+### Honest limitations
+
+* **It rarely walks forward.** In this model the forward-walking neuron
+  (DNp09) is almost never driven by the visual input or background activity,
+  so the fly mostly turns in place and jumps.
+* **Backing up is weak.** LC16 → MDN only shows up briefly, during escapes.
+* **The neuron model is simple**, a leaky integrate-and-fire model with
+  parameters from Shiu et al. 2024. Real neurons, neuromodulation, learning
+  and hunger are all far richer.
+
+## Install and run
 
 ```bash
 pip install -r requirements.txt
-```
-
-Tkinter ships with most Python installs. On Debian/Ubuntu you may need
-`sudo apt install python3-tk`.
-
-## Run
-
-```bash
 python fly_pet.py
 ```
 
-The first run tries to build the circuit from FlyWire (see below). If that
-fails, it uses a built-in fallback circuit, so the pet always runs.
+Tkinter ships with most Python installs (on Debian/Ubuntu:
+`sudo apt install python3-tk`). The first launch downloads about 130 MB of
+connectome data into `brain_data/` and builds the brain, which takes about a
+minute. After that it starts in a few seconds. No FlyWire token is needed.
 
-### Using the real connectome
-
-To download connectivity you need a free FlyWire CAVE token:
-
-1. Sign in at <https://global.daf-apis.com/auth/api/v1/create_token> with a
-   Google account. You may first need to accept the FlyWire public data terms at
-   <https://codex.flywire.ai>.
-2. Build the circuit once with your token:
-
-   ```bash
-   python fly_pet.py --token YOUR_TOKEN
-   ```
-
-This stores the token (through `fafbseg`), downloads the data and caches the
-result to `fly_circuit.json`. After that, the pet starts instantly and works
-offline. Run `python fly_pet.py --build` any time to rebuild the cache.
-
-What `--build` does:
-
-1. **fafbseg** looks up every neuron of the 8 cell types in the FlyWire
-   hierarchical annotations (public release, materialization 783), split by
-   brain hemisphere.
-2. It fetches all downstream partners of the sensory neurons and all upstream
-   partners of the descending neurons (≥5 synapses), and keeps only the direct
-   paths and the two-hop sensory → interneuron → DN paths.
-3. Edge weights are output fractions (sensory side) and input fractions (DN
-   side). The graph is loaded into **navis**, and `navis.models.TraversalModel`
-   runs repeated probabilistic signal propagation from each sensory group. How
-   often each DN is reached, and after how many hops, gives the sensory → motor
-   gain. The strongest route is saved so the brain panel can display it.
-
-At runtime a small rate model (time constant 80 ms) turns those gains into
-descending neuron activity 40 times per second.
-
-### Other options
+Options:
 
 ```bash
-python fly_pet.py --offline        # always use the built-in fallback circuit
-python fly_pet.py --simulate 3     # no GUI: move a virtual cursor toward the fly, print its reactions
+python fly_pet.py --noise 0.07    # more spontaneous activity (0 = silent brain)
+python fly_pet.py --simulate 4    # no window: rush a virtual cursor at the fly, print neuron rates
+python fly_pet.py --rebuild       # rebuild the cached brain from the downloaded data
 ```
+
+A fast computer is needed. Each millisecond of brain time processes every
+spike through 14 million connections. The panel shows the brain speed. Below
+1.0× the fly reacts in slow motion, but it still behaves correctly.
+
+## The model
+
+* **Neurons**: leaky integrate-and-fire, using Shiu et al. 2024 (*Nature*)
+  parameters: rest −52 mV, threshold −45 mV, membrane τ 20 ms, synaptic
+  τ 5 ms, 0.275 mV per synapse, ~2 ms delay and refractory period. Time
+  step is 1 ms.
+* **Synapse signs** come from each neuron's predicted neurotransmitter.
+  Acetylcholine excites; GABA, glutamate and histamine inhibit. Dopamine,
+  serotonin and octopamine are slow neuromodulators, so they get no fast
+  effect.
+* **Added for continuous running**:
+  * spike-frequency adaptation (1 mV per spike, τ 200 ms)
+  * weak random synaptic events on every non-sensory neuron (`--noise`)
+
+  Without these, a few recurrent circuits (the mushroom body, the antennal
+  lobe) run away into permanent seizure-like firing.
+* **Sensory neurons** fire only from sensory input.
+
+### Data sources
+
+* Connectivity and neuron list: FlyWire 783 as packaged by
+  [Shiu et al. 2024](https://github.com/philshiu/Drosophila_brain_model).
+* Cell types, sides and neurotransmitters: FlyWire hierarchical annotations
+  (Schlegel et al. 2024), loaded with `fafbseg`.
+* Connectome: Dorkenwald et al. 2024, Schlegel et al. 2024 (*Nature*).
 
 ## Platform notes
 
@@ -89,11 +106,3 @@ python fly_pet.py --simulate 3     # no GUI: move a virtual cursor toward the fl
 * **macOS**: transparent background with the system Tk.
 * **Linux/X11**: Tk has no per-pixel transparency, so the fly sits on a small
   beige tile.
-
-## Caveats
-
-This is a toy, not a biophysical model. The connectome supplies *which* neurons
-connect and *how strongly*. Neuron dynamics, thresholds, and the way the cursor
-is turned into visual input are all simplified by hand. The fallback circuit is
-qualitative and based on published behaviour studies (von Reyn 2017, Ache 2019,
-Wu 2016, Ribeiro 2018). It is not measured synapse data.
