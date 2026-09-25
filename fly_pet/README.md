@@ -235,7 +235,7 @@ Tkinter ships with most Python installs (on Debian/Ubuntu:
 
 To check your version, run `python fly_pet.py --version`. The version is also
 printed at startup and shown in each window's title. The current version is
-**5.0.0**.
+**5.0.1**.
 
 Options:
 
@@ -305,6 +305,13 @@ both flies running.
   Without these, some recurrent circuits (the mushroom body, the antennal
   lobe) run away into permanent seizure-like firing.
 * **Sensory neurons** fire only from sensory input.
+* **The eyes ignore the fly's own turning**, as real flies do with an
+  efference copy, and walking damps LC9 (Turner et al. 2022). Each object
+  excites its own patch of the eye, so objects don't add up. The
+  object-tracking channels (LC10a, LC9) top out at 90 Hz. Above that, in this
+  model, they spill into the Giant Fiber and the flies jump constantly.
+* **A jump needs a real Giant Fiber volley** (over 70 Hz; a looming threat
+  drives it to 100–340 Hz) and a second's recovery after landing.
 
 ### Data sources
 

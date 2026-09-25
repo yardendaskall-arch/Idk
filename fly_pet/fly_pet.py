@@ -86,8 +86,9 @@ import numpy as np
 # 4.0 female + male flies, 4.1 walking (LC9), arousal, her choice,
 # 4.2 courtship conditioning (he learns from rejection),
 # 4.3 egg laying (oviDN), she approaches him when she says yes,
-# 5.0 life cycle (eggs hatch into new flies), food and eating, dust and grooming
-__version__ = "5.0.0"
+# 5.0 life cycle (eggs hatch into new flies), food and eating, dust and grooming,
+# 5.0.1 fix constant jumping
+__version__ = "5.0.1"
 
 HERE = Path(__file__).resolve().parent
 DATA_DIR = HERE / "brain_data"
@@ -696,6 +697,8 @@ def _clamp(x: float, lo: float = 0.0, hi: float = 1.0) -> float:
 
 class Eyes:
     MAX_HZ = 150.0
+    TRACK_MAX_HZ = 90.0    # object-tracking LC10a/LC9: higher rates spill into
+                           # the Giant Fiber in this model and cause stray jumps
     BLIND_SPOT = math.radians(165)   # can't see further back than this
 
     def __init__(self):
@@ -707,11 +710,16 @@ class Eyes:
     MICROSACCADE = 0.15   # rad/s: flies jiggle their retinas, so still things
                           # still move a little on the eye (Fenk et al. 2022)
 
-    def see(self, objects, dt: float):
+    def see(self, objects, dt: float, self_turn: float = 0.0, walking: float = 0.0):
         """objects: (name, dist px, bearing rad [+ = fly's left], radius px,
         speed px/s, gain). `gain` scales the object-tracking neurons (LC10a,
         LC9) for that object: arousal turns up a fly's visual response to its
-        partner (Hindmarsh Sten et al. 2021)."""
+        partner (Hindmarsh Sten et al. 2021).
+
+        self_turn: how much the fly itself turned this frame (rad). Motion the
+        fly causes by turning is cancelled (an efference copy), so only things
+        that really move - or that it walks past - sweep across the eye.
+        walking: walking speed (px/s); walking damps LC9 (Turner et al. 2022)."""
         feature_sum = {g: 0.0 for g in SENSORY}
         self.seen = []
         for name, dist, bearing, radius, speed, gain in objects:
@@ -720,8 +728,8 @@ class Eyes:
             looming = max((alpha - prev) / max(dt, 1e-3), 0.0)    # rad/s
             self._prev_alpha[name] = alpha
             # How fast it sweeps across the eye (its own motion or the fly's turning)
-            sweep = (abs(_wrap(bearing - self._prev_bearing.get(name, bearing)))
-                     / max(dt, 1e-3) + self.MICROSACCADE)
+            moved = _wrap(bearing - self._prev_bearing.get(name, bearing)) - self_turn
+            sweep = abs(moved) / max(dt, 1e-3) + self.MICROSACCADE
             self._prev_bearing[name] = bearing
 
             visible = _sig((self.BLIND_SPOT - abs(bearing)) / 0.05)
@@ -736,15 +744,19 @@ class Eyes:
                 "LC10a": _clamp(gain * _sig((0.25 - alpha) / 0.05)
                                 * _clamp(sweep / 1.2)),                 # small moving object
                 "LC9": _clamp(gain * _sig((0.3 - alpha) / 0.06)
-                              * _clamp(sweep / 1.2)),                   # small object
+                              * _clamp(sweep / 1.2)
+                              / (1 + abs(walking) / 150)),              # small object
             }
+            # Each object excites its own patch of the eye, so the group's rate
+            # follows the most exciting object rather than the sum of them all.
             for g in SENSORY:
                 ctype, side = g.rsplit("_", 1)
-                feature_sum[g] += feature[ctype] * field[side]
+                feature_sum[g] = max(feature_sum[g], feature[ctype] * field[side])
             self.seen.append({"name": name, "bearing": bearing, "alpha": alpha,
                               "looming": looming, "speed": speed, "visible": visible})
         for g in SENSORY:
-            self.hz[g] = self.MAX_HZ * _clamp(feature_sum[g])
+            top = self.TRACK_MAX_HZ if g.startswith(("LC10a", "LC9")) else self.MAX_HZ
+            self.hz[g] = top * _clamp(feature_sum[g])
         return self.hz
 
 
@@ -756,7 +768,8 @@ class Body:
     TURN_PER_HZ = 0.02       # rad/s per Hz of DNa02 left-right difference
     WALK_PER_HZ = 3.0        # px/s per Hz of DNp09
     BACK_PER_HZ = 3.0        # px/s per Hz of MDN
-    JUMP_HZ = 25.0           # Giant Fiber rate that launches a jump
+    JUMP_HZ = 70.0           # Giant Fiber rate that launches a jump (a real threat
+                             # drives it to 100-340 Hz; stray bursts stay below)
     SING_HZ = 30.0           # pIP10 rate that extends a wing (male song)
     OPEN_HZ = 20.0           # vpoDN rate that opens the vaginal plate (female)
     REJECT_HZ = 12.0         # DNp13 rate that extrudes the ovipositor (female)
@@ -1067,6 +1080,7 @@ class Fly:
         self.heading = random.uniform(-math.pi, math.pi)
         self.leg_phase = 0.0
         self.jump = None            # (t0, duration, from, to)
+        self.landed_at = 0.0
         self.speed_px = 0.0         # how fast it actually moves (for others' eyes)
         self.born = time.perf_counter() if newborn else -1e9
         self.taste = 0.0            # male: forelegs touching a female
@@ -1176,7 +1190,9 @@ class Fly:
             # Screen y points down, so the fly's left is at heading - 90 degrees.
             bearing = _wrap(self.heading - math.atan2(dy, dx))
             objects.append((name, math.hypot(dx, dy), bearing, radius, speed, gain))
-        hz = dict(self.eyes.see(objects, dt))
+        self_turn = _wrap(self.heading - getattr(self, "_last_heading", self.heading))
+        self._last_heading = self.heading
+        hz = dict(self.eyes.see(objects, dt, self_turn, self.motor["speed"]))
         if self.sex == "female":
             hz["JO-B"] = 150.0 * self.hearing     # antennal hearing neurons
             hz["vpoEN"] = 60.0 * self.hearing     # song-tuned neurons (Wang et al. 2021)
@@ -1232,12 +1248,13 @@ class Fly:
             u = (time.perf_counter() - t0) / dur
             if u >= 1:
                 self.jump = None
+                self.landed_at = time.perf_counter()
                 self.x, self.y = jx1, jy1
             else:
                 e = 1 - (1 - u) ** 3
                 self.x, self.y = jx0 + (jx1 - jx0) * e, jy0 + (jy1 - jy0) * e
-        elif motor["jump"]:
-            self._start_jump()
+        elif motor["jump"] and time.perf_counter() > self.landed_at + 1.0:
+            self._start_jump()                  # (needs a second after landing)
         elif not self.busy():
             self.heading = _wrap(self.heading - motor["turn"] * dt)
             speed = motor["speed"]
