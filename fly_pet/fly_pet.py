@@ -74,14 +74,16 @@ import numpy as np
 
 # 1.0 hand-tuned circuit, 2.0 whole-brain simulation, 3.0 memory,
 # 3.1 "what he sees and thinks" view, 3.2 split into three windows,
-# 4.0 female + male flies, 4.1 walking (LC9), arousal, her choice
-__version__ = "4.1.0"
+# 4.0 female + male flies, 4.1 walking (LC9), arousal, her choice,
+# 4.2 courtship conditioning (he learns from rejection)
+__version__ = "4.2.0"
 
 HERE = Path(__file__).resolve().parent
 DATA_DIR = HERE / "brain_data"
 CACHE_FORMAT = 5
 CACHE_FILE = {"female": DATA_DIR / "brain_female_783.npz",
               "male": DATA_DIR / "brain_male_cns09.npz"}
+REJECTION_FILE = DATA_DIR / "courtship_male.json"
 MEMORY_FILE = {"female": DATA_DIR / "memory_female.npz",
                "male": DATA_DIR / "memory_male.npz"}
 
@@ -729,13 +731,45 @@ class Arousal:
         # Female only: a slowly wandering willingness to mate, different each run.
         self.mood = random.uniform(0.2, 0.9)
         self.mated_at = -1e9
+        # Male only: courtship conditioning. Seconds of rejection he has
+        # experienced, fading over ~15 minutes (in real flies, hours).
+        self.rejected = 0.0
+        if sex == "male":
+            self._load_rejections()
+
+    REJECTION_TAU = 900.0      # s
+
+    def interest(self) -> float:
+        """How much being near her still excites him (1 = fully, 0 = not)."""
+        return 1.0 / (1.0 + self.rejected / 10.0)
+
+    def was_rejected(self, dt: float):
+        """She's rejecting him up close: he loses interest now, and learns."""
+        self.rejected += dt
+        self.level *= 1 - 0.5 * dt
+
+    def _load_rejections(self):
+        try:
+            import json
+            d = json.loads(REJECTION_FILE.read_text())
+            away = max(time.time() - d["saved"], 0.0)
+            self.rejected = d["rejected"] * math.exp(-away / self.REJECTION_TAU)
+        except (OSError, ValueError, KeyError):
+            pass
+
+    def save_rejections(self):
+        import json
+        REJECTION_FILE.write_text(json.dumps({"rejected": self.rejected,
+                                              "saved": time.time()}))
 
     def update(self, dt: float, now: float, cue: float):
         """cue 0..1: how strongly the fly senses a partner right now."""
         if self.sex == "male":
             sated = now - self.mated_at < 60           # males rest after mating
-            rise = 0.0 if sated else 0.5 * cue * (1 - self.level)
+            # Rejection lowers how high his arousal can climb.
+            rise = 0.0 if sated else 0.5 * cue * max(self.interest() - self.level, 0.0)
             self.level += (rise - self.level / 30) * dt
+            self.rejected *= math.exp(-dt / self.REJECTION_TAU)
         else:
             self.level += (0.4 * cue * (1 - self.level) - self.level / 40) * dt
             # Mood drifts around 0.5 over minutes; after mating it drops to 0
@@ -921,10 +955,6 @@ class Fly:
     def head(self):
         return (self.x + math.cos(self.heading) * 10 * self.scale,
                 self.y + math.sin(self.heading) * 10 * self.scale)
-
-    def rear(self):
-        return (self.x - math.cos(self.heading) * 16 * self.scale,
-                self.y - math.sin(self.heading) * 16 * self.scale)
 
     def place(self):
         h = self.SIZE // 2
@@ -1122,9 +1152,15 @@ class App:
         self.paused = not self.paused
 
     def quit(self):
+        self._save_rejections()
         for f in self.flies:
             f.brain.stop()
         self.root.destroy()
+
+    def _save_rejections(self):
+        m = self.fly("male")
+        if m:
+            m.arousal.save_rejections()
 
     def run(self):
         self.root.mainloop()
@@ -1149,6 +1185,10 @@ class App:
             f.draw(self._is_mating(f))
         if self.windows:
             self.update_windows()
+        if now - getattr(self, "_last_save", now) > 60:
+            self._save_rejections()
+            self._last_save = now
+        self._last_save = getattr(self, "_last_save", now)
         self.root.after(int(1000 / self.FPS), self.tick)
 
     def _is_mating(self, fly) -> bool:
@@ -1178,9 +1218,9 @@ class App:
         m.arousal.update(dt, now, _clamp(0.6 * sees_her + m.taste))
         f.arousal.update(dt, now, f.hearing)
         # Being rejected (she extrudes her ovipositor at him) dampens his
-        # arousal - real males learn from rejection too.
+        # arousal now and teaches him to court her less (courtship conditioning).
         if f.motor["reject"] and d < 80:
-            m.arousal.level *= 1 - 0.3 * dt
+            m.arousal.was_rejected(dt)
 
     def _update_mating(self, now: float):
         m, f = self.fly("male"), self.fly("female")
@@ -1203,15 +1243,14 @@ class App:
                 m.place()
                 m.win.lift()
             return
-        # Copulation happens when he's courting, she's accepting (vaginal
-        # plate open, not rejecting), and he is right behind her, facing her.
+        # Copulation happens when he's courting, she's accepting at that moment
+        # (vaginal plate open, not rejecting), and he is touching her with his
+        # forelegs while facing her. Then the body does what real males do:
+        # he walks around and mounts her from behind.
         courting = m.motor["sing"] or m.body.hz["P1"] > 20
         accepting = f.motor["open"] and not f.motor["reject"] and now > f.mated_until
-        hx, hy = m.head()
-        rx, ry = f.rear()
-        behind = (math.hypot(hx - rx, hy - ry) < 18
-                  and abs(_wrap(m.heading - f.heading)) < 1.0)
-        if courting and accepting and behind and not (m.jump or f.jump):
+        facing = abs(_wrap(m.heading - math.atan2(f.y - m.y, f.x - m.x))) < 1.0
+        if courting and accepting and m.taste and facing and not (m.jump or f.jump):
             self.mating = (m, f, now + self.MATING_SECONDS)
 
     # ------------------------------------------------ windows into their minds
@@ -1407,7 +1446,8 @@ class App:
         if fly.switch_on.get():
             line = f"Lab override ON: {SWITCH[fly.sex]} forced on"
         elif fly.sex == "male":
-            line = f"Arousal {a.level:.2f} → P1 at {a.drive_hz():.0f} Hz"
+            line = (f"Arousal {a.level:.2f} → P1 at {a.drive_hz():.0f} Hz   ·   "
+                    f"learned from rejection: interest ×{a.interest():.2f}")
         else:
             line = f"Arousal {a.level:.2f} · mood {a.mood:.2f} → pC1 at {a.drive_hz():.0f} Hz"
         t(c, 10, y, line, "#f2d16b", 9)

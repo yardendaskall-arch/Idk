@@ -88,12 +88,19 @@ How each part works:
   DNp13 wins, and she extrudes her ovipositor at him. With her pC1 higher,
   **yes** wins: vpoDN opens her to mating. In between, noise tips it either
   way, so the same fly can go back and forth.
-* **Rejection hurts his arousal.** Being rejected up close lowers his
-  arousal, as real males learn from rejection.
+* **He learns from rejection (courtship conditioning).** Real male flies
+  court persistently (following, tapping, singing), but after being
+  rejected for a while they court much less for hours. That's one of the
+  best-studied kinds of learning in flies. Here, every second she rejects
+  him up close lowers his arousal right away and lowers how high it can
+  climb later. After ~45 seconds of rejection he mostly gives up. It fades
+  over ~15 minutes (hours in real flies) and is remembered between runs in
+  `brain_data/courtship_male.json`. His window shows it as "interest ×0.40".
 * **Mating (♥).** It happens when he's courting, she's saying yes at that
-  moment, and he's right behind her facing the same way. He rides on her
-  back for 20 seconds (real flies take ~20 minutes). She won't mate again
-  for at least a minute, and her mood takes minutes to recover.
+  moment, and he's touching her with his forelegs while facing her. Then he
+  mounts her from behind and rides on her back for 20 seconds (real flies
+  take ~20 minutes). She won't mate again for at least a minute, and her
+  mood takes minutes to recover.
 
 **Lab override.** Right-click a fly and choose "Lab override" to force its P1
 or pC1 fully on, as scientists do with light. With her pC1 forced on, she
@@ -161,7 +168,7 @@ Tkinter ships with most Python installs (on Debian/Ubuntu:
 
 To check your version, run `python fly_pet.py --version`. The version is also
 printed at startup and shown in each window's title. The current version is
-**4.1.0**.
+**4.2.0**.
 
 Options:
 
@@ -192,7 +199,9 @@ both flies running.
   detectors.
 * **Mating itself is drawn, not simulated.** The brains decide *whether*
   (her vpoDN "yes" vs DNp13 "no", his courtship state). The body code decides
-  that a willing pair, with him right behind her, counts as mating.
+  that a willing pair in contact counts as mating, and animates the mount.
+* **His learning from rejection is hand-written**, like arousal. In real
+  flies it involves the mushroom body and the pheromones of mated females.
 * **The learning rule is simplified.** Real flies learn mostly in the
   mushroom body, driven by dopamine. Here, learning happens directly at the
   visual neurons' synapses.
