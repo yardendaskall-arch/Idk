@@ -1,0 +1,42 @@
+// UI smoke test: runs the real activities on a simulated Android 8.1 (Robolectric 3.8, which has no
+// AndroidX dependency) against the real Python server in --dry-run mode.
+//
+//   ANDROID_JAR=/path/to/android.jar(API 31+)  PY_BIN=/path/to/python-with-server-deps  gradle test
+//
+// Robolectric 3.8 needs a JDK 8 to run the tests (set JDK8_HOME); Gradle itself can use a newer JDK.
+plugins { id 'java' }
+repositories { mavenCentral() }
+
+def androidJar = System.getenv('ANDROID_JAR') ?: { throw new GradleException('Set ANDROID_JAR to an android.jar (API 31+)') }()
+def jdk8 = System.getenv('JDK8_HOME') ?: '/usr/lib/jvm/java-8-openjdk-amd64'
+
+java { sourceCompatibility = JavaVersion.VERSION_1_8; targetCompatibility = JavaVersion.VERSION_1_8 }
+tasks.withType(JavaCompile).configureEach { options.release = 8; options.encoding = 'UTF-8' }
+sourceSets { main { java { srcDirs = ['../../android/src'] } } }
+
+dependencies {
+    compileOnly files(androidJar)
+    testCompileOnly files(androidJar)
+    testImplementation 'org.robolectric:robolectric:3.8'
+    testImplementation 'junit:junit:4.12'
+    // Framework classes Robolectric 3.8 runs the app against (Android 8.1).
+    testRuntimeOnly 'org.robolectric:android-all:8.1.0-robolectric-4611349'
+}
+
+configurations { androidAll }
+dependencies { androidAll 'org.robolectric:android-all:8.1.0-robolectric-4611349' }
+tasks.register('fetchAndroidAll', Copy) {
+    from configurations.androidAll
+    into layout.buildDirectory.dir('android-all')
+}
+
+test {
+    dependsOn 'fetchAndroidAll'
+    executable = "${jdk8}/bin/java"
+    useJUnit()
+    systemProperty 'robolectric.offline', 'true'
+    systemProperty 'robolectric.dependency.dir', layout.buildDirectory.dir('android-all').get().asFile.absolutePath
+    systemProperty 'python.bin', System.getenv('PY_BIN') ?: 'python3'
+    systemProperty 'server.script', file('../../server/laptop_remote_server.py').absolutePath
+    testLogging { events 'passed', 'failed', 'skipped'; exceptionFormat = 'full' }
+}

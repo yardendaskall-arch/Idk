@@ -1,0 +1,9 @@
+# build output
+build/
+# Python
+__pycache__/
+*.pyc
+.venv/
+# Gradle (UI test project)
+tests/robolectric/.gradle/
+tests/robolectric/build/
