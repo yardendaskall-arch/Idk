@@ -28,6 +28,7 @@ final class Api {
             int code = c.getResponseCode();
             InputStream in = code >= 400 ? c.getErrorStream() : c.getInputStream();
             String body = in == null ? "" : readAll(in);
+            if (code == 404) throw new Exception("the app on the board is out of date - copy the newest python/main.py and sketch.ino into App Lab and press Run");
             if (code >= 400) throw new Exception("HTTP " + code);
             JSONObject json = new JSONObject(body);
             if (!json.optBoolean("ok", true)) throw new Exception(json.optString("error", "board error"));
