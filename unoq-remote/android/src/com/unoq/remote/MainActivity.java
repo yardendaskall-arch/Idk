@@ -551,20 +551,21 @@ public class MainActivity extends Activity {
     /** Scan the phone's /24 Wi-Fi subnet for a board answering /api/info on the given port. */
     private void scan() {
         if (scanning) { scanning = false; return; }
-        final String prefix = localPrefix();
-        if (prefix == null) { setStatus("Connect your phone to Wi-Fi first", BAD); return; }
+        final List<String> prefixes = localPrefixes();
+        if (prefixes.isEmpty()) { setStatus("Connect your phone to Wi-Fi or turn on its hotspot first", BAD); return; }
         int p;
         try { p = Integer.parseInt(portField.getText().toString().trim()); } catch (NumberFormatException e) { p = 7000; }
         final int fp = p;
         scanning = true;
         scanBtn.setText("Stop");
-        setStatus("Searching " + prefix + "0/24 …", MUTED);
+        setStatus("Searching " + prefixes.size() + " network(s)…", MUTED);
+        final int total = prefixes.size() * 254;
         new Thread(new Runnable() {
             @Override public void run() {
                 final ExecutorService pool = Executors.newFixedThreadPool(48);
                 final AtomicInteger done = new AtomicInteger();
                 final String[] found = new String[1];
-                for (int i = 1; i < 255; i++) {
+                for (String prefix : prefixes) for (int i = 1; i < 255; i++) {
                     final String ip = prefix + i;
                     pool.execute(new Runnable() {
                         @Override public void run() {
@@ -579,14 +580,14 @@ public class MainActivity extends Activity {
                             } finally {
                                 final int n = done.incrementAndGet();
                                 if (n % 32 == 0 && scanning) ui.post(new Runnable() {
-                                    @Override public void run() { setStatus("Searching… " + (n * 100 / 254) + "%", MUTED); }
+                                    @Override public void run() { setStatus("Searching… " + (n * 100 / total) + "%", MUTED); }
                                 });
                             }
                         }
                     });
                 }
                 pool.shutdown();
-                try { pool.awaitTermination(60, TimeUnit.SECONDS); } catch (InterruptedException ignored) {}
+                try { pool.awaitTermination(120, TimeUnit.SECONDS); } catch (InterruptedException ignored) {}
                 ui.post(new Runnable() {
                     @Override public void run() {
                         scanning = false;
@@ -603,7 +604,8 @@ public class MainActivity extends Activity {
         }).start();
     }
 
-    private static String localPrefix() {
+    private static List<String> localPrefixes() {
+        List<String> out = new ArrayList<>();
         try {
             for (NetworkInterface nif : Collections.list(NetworkInterface.getNetworkInterfaces())) {
                 if (!nif.isUp() || nif.isLoopback()) continue;
@@ -612,12 +614,13 @@ public class MainActivity extends Activity {
                 for (InetAddress a : Collections.list(nif.getInetAddresses())) {
                     if (a instanceof Inet4Address && a.isSiteLocalAddress()) {
                         String ip = a.getHostAddress();
-                        return ip.substring(0, ip.lastIndexOf('.') + 1);
+                        String prefix = ip.substring(0, ip.lastIndexOf('.') + 1);
+                        if (!out.contains(prefix)) out.add(prefix);
                     }
                 }
             }
         } catch (Exception ignored) {}
-        return null;
+        return out;
     }
 
     // ------------------------------------------------------------------ small helpers
