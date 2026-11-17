@@ -1,0 +1,6 @@
+name: UNO Q Remote
+icon: 📱
+description: HTTP API on port 7000 so the UNO Q Remote Android app can control pins and LEDs
+
+bricks:
+  - arduino:web_ui
