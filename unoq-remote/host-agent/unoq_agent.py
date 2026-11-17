@@ -34,7 +34,7 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
-VERSION = 1
+VERSION = 2
 PORT = int(os.environ.get("UNOQ_AGENT_PORT", "7001"))
 INSTALL_DIR = "/opt/unoq-agent"
 CONF_DIR = "/etc/unoq-agent"
@@ -268,6 +268,85 @@ def power(action):
     return action
 
 
+# ----------------------------------------------------------------------------- remote display
+
+SCREEN_HELP = "Remote display needs: sudo apt install python3-pil xdotool"
+_screen_size = (0, 0)
+
+
+def find_display():
+    """Point DISPLAY / XAUTHORITY at the desktop (Xfce on X11)."""
+    if not os.environ.get("DISPLAY"):
+        socks = sorted(os.listdir("/tmp/.X11-unix")) if os.path.isdir("/tmp/.X11-unix") else []
+        os.environ["DISPLAY"] = ":" + socks[0][1:] if socks else ":0"
+    if not os.environ.get("XAUTHORITY"):
+        for cand in (os.path.expanduser("~/.Xauthority"), f"/run/user/{os.geteuid()}/gdm/Xauthority"):
+            if os.path.exists(cand):
+                os.environ["XAUTHORITY"] = cand
+                break
+
+
+def screen_frame(width, quality):
+    global _screen_size
+    try:
+        from PIL import Image, ImageGrab
+    except ImportError:
+        raise RuntimeError(SCREEN_HELP)
+    find_display()
+    try:
+        img = ImageGrab.grab(xdisplay=os.environ["DISPLAY"])
+    except Exception as e:  # noqa: BLE001
+        raise RuntimeError(f"can't capture the desktop on {os.environ['DISPLAY']} ({e}). "
+                           "Is someone logged in to the desktop?")
+    _screen_size = img.size
+    if width and width < img.width:
+        img = img.resize((width, max(1, img.height * width // img.width)), Image.BILINEAR)
+    import io
+    buf = io.BytesIO()
+    img.convert("RGB").save(buf, "JPEG", quality=quality)
+    return buf.getvalue()
+
+
+KEY_RE = re.compile(r"^[A-Za-z0-9_+]{1,40}$")
+
+
+def xdo(*args):
+    find_display()
+    code, text = run(["xdotool"] + [str(a) for a in args], timeout=10)
+    if code == 127:
+        raise RuntimeError(SCREEN_HELP)
+    if code != 0:
+        raise RuntimeError(text.strip() or "xdotool failed")
+
+
+def screen_input(a):
+    kind = a.get("type")
+    x, y = int(a.get("x", 0)), int(a.get("y", 0))
+    button = {"left": 1, "middle": 2, "right": 3}.get(a.get("button", "left"), 1)
+    if kind == "move":
+        xdo("mousemove", x, y)
+    elif kind in ("down", "up"):
+        xdo("mousemove", x, y, "mousedown" if kind == "down" else "mouseup", button)
+    elif kind == "click":
+        xdo("mousemove", x, y, "click", "--repeat", max(1, min(3, int(a.get("count", 1)))), button)
+    elif kind == "scroll":
+        steps = max(-20, min(20, int(a.get("dy", 0))))
+        if steps:
+            xdo("mousemove", x, y, "click", "--repeat", abs(steps), 4 if steps < 0 else 5)
+    elif kind == "key":
+        keys = str(a.get("keys", ""))
+        if not KEY_RE.match(keys):
+            raise RuntimeError("bad key name")
+        xdo("key", "--clearmodifiers", keys)
+    elif kind == "type":
+        text = str(a.get("text", ""))[:2000]
+        if text:
+            xdo("type", "--delay", "8", "--", text)
+    else:
+        raise RuntimeError("unknown input type")
+    return kind
+
+
 # ----------------------------------------------------------------------------- terminal
 
 MARK = "__UNOQ_CWD__"
@@ -364,6 +443,25 @@ class Handler(BaseHTTPRequestHandler):
         if not pin_ok(self.headers.get("X-Pin") or args.get("pin")):
             return self._send(401, {"ok": False, "error": "wrong PIN"})
 
+        if path == "/api/screen/frame":
+            try:
+                width = max(160, min(3840, int(args.get("w") or 1280)))
+                quality = max(20, min(90, int(args.get("q") or 60)))
+                jpg = screen_frame(width, quality)
+            except Exception as e:  # noqa: BLE001
+                return self._send(200, {"ok": False, "error": str(e)})
+            self.send_response(200)
+            self.send_header("Content-Type", "image/jpeg")
+            self.send_header("Content-Length", str(len(jpg)))
+            self.send_header("X-Screen-W", str(_screen_size[0]))
+            self.send_header("X-Screen-H", str(_screen_size[1]))
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.send_header("Access-Control-Expose-Headers", "X-Screen-W, X-Screen-H")
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(jpg)
+            return
+
         try:
             if path == "/api/auth":
                 res = {}
@@ -379,6 +477,8 @@ class Handler(BaseHTTPRequestHandler):
                 res = {"result": wifi_connect(str(args["ssid"]), str(args.get("password") or ""))}
             elif path == "/api/os/power" and method == "POST":
                 res = {"result": power(str(args.get("action")))}
+            elif path == "/api/screen/input" and method == "POST":
+                res = {"result": screen_input(args)}
             elif path == "/api/term/exec" and method == "POST":
                 timeout = max(1, min(300, int(args.get("timeout") or 30)))
                 res = term_exec(str(args.get("cmd", "")), args.get("cwd"), timeout)
@@ -423,6 +523,11 @@ def install():
     if os.path.exists(page) and HERE != INSTALL_DIR:
         shutil.copy(page, os.path.join(INSTALL_DIR, "index.html"))
     os.chmod(target, 0o755)
+
+    print("Installing remote-display helpers (python3-pil, xdotool)…")
+    code, text = run(["apt-get", "install", "-y", "python3-pil", "xdotool"], timeout=600)
+    if code != 0:
+        print("note: couldn't install them now (no internet?). Remote display will ask for them later.")
 
     os.makedirs(CONF_DIR, exist_ok=True)
     pin = load_pin()

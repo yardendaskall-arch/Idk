@@ -64,6 +64,20 @@ final class AgentPages {
     private final List<String> history = new ArrayList<>();
     private int histPos;
 
+    // display views
+    private LinearLayout dispLock, dispBody;
+    private ScreenView screen;
+    private TextView fpsText;
+    private EditText typeField;
+    private volatile boolean screenRunning;
+    private volatile int screenGen;
+    private int quality = 1;   // 0 fast, 1 normal, 2 sharp
+    private static final int[][] QUALITY = {{800, 45}, {1280, 60}, {1600, 75}};
+    private static final String[] QUALITY_NAMES = {"Fast", "Normal", "Sharp"};
+    private final ExecutorService inputExec = Executors.newSingleThreadExecutor();
+    private final java.util.concurrent.atomic.AtomicReference<int[]> pendingMove = new java.util.concurrent.atomic.AtomicReference<>();
+    private final java.util.concurrent.atomic.AtomicBoolean moveQueued = new java.util.concurrent.atomic.AtomicBoolean();
+
     AgentPages(MainActivity activity) {
         a = activity;
         prefs = a.getSharedPreferences("unoq", MainActivity.MODE_PRIVATE);
@@ -80,14 +94,16 @@ final class AgentPages {
         if (!unlocked && !pin.isEmpty()) tryUnlock(pin, null);
         if (i == 1 && unlocked) { ui.post(infoPoller); loadProcesses(); }
         if (i == 2 && unlocked) termIn.requestFocus();
+        if (i == 3 && unlocked) startScreen(); else screenRunning = false;
     }
 
-    void stop() { ui.removeCallbacks(infoPoller); }
+    void stop() { ui.removeCallbacks(infoPoller); screenRunning = false; }
 
     void shutdown() {
         stop();
         sysExec.shutdownNow();
         termExec.shutdownNow();
+        inputExec.shutdownNow();
     }
 
     private final Runnable infoPoller = new Runnable() {
@@ -164,7 +180,9 @@ final class AgentPages {
         sysBody.setVisibility(on ? View.VISIBLE : View.GONE);
         termLock.setVisibility(on ? View.GONE : View.VISIBLE);
         termBody.setVisibility(on ? View.VISIBLE : View.GONE);
-        if (!on) ui.removeCallbacks(infoPoller);
+        dispLock.setVisibility(on ? View.GONE : View.VISIBLE);
+        dispBody.setVisibility(on ? View.VISIBLE : View.GONE);
+        if (!on) { ui.removeCallbacks(infoPoller); screenRunning = false; }
     }
 
     /** Runs an agent call on the system thread; shows errors as a short message. */
@@ -684,5 +702,195 @@ final class AgentPages {
                 });
             }
         });
+    }
+
+    // ------------------------------------------------------------------ Display page
+
+    View buildDisplayPage() {
+        LinearLayout root = a.vertical();
+        root.setBackgroundColor(MainActivity.BG);
+        root.setPadding(a.dp(8), a.dp(8), a.dp(8), a.dp(6));
+
+        dispLock = lockCard(false);
+        ScrollView lockScroll = new ScrollView(a);
+        lockScroll.addView(dispLock);
+        root.addView(lockScroll);
+
+        dispBody = a.vertical();
+        root.addView(dispBody, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
+
+        // special keys, scrollable sideways
+        android.widget.HorizontalScrollView hs = new android.widget.HorizontalScrollView(a);
+        hs.setHorizontalScrollBarEnabled(false);
+        LinearLayout keys = a.horizontal();
+        hs.addView(keys);
+        final Button qBtn = a.button(QUALITY_NAMES[quality], MainActivity.ACCENT);
+        addKey(keys, qBtn, null);
+        qBtn.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) { quality = (quality + 1) % 3; qBtn.setText(QUALITY_NAMES[quality]); }
+        });
+        String[][] special = {{"Esc", "Escape"}, {"Tab", "Tab"}, {"⏎", "Return"}, {"⌫", "BackSpace"},
+                {"←", "Left"}, {"↑", "Up"}, {"↓", "Down"}, {"→", "Right"}, {"Menu", "super"},
+                {"Ctrl+C", "ctrl+c"}, {"Ctrl+V", "ctrl+v"}, {"Ctrl+Z", "ctrl+z"}, {"Alt+Tab", "alt+Tab"},
+                {"Alt+F4", "alt+F4"}, {"Terminal", "ctrl+alt+t"}, {"Del", "Delete"}};
+        for (final String[] k : special) {
+            Button b = a.button(k[0], MainActivity.CARD_2);
+            addKey(keys, b, k[1]);
+        }
+        dispBody.addView(hs);
+
+        screen = new ScreenView(a);
+        LinearLayout.LayoutParams sp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f);
+        sp.topMargin = sp.bottomMargin = a.dp(6);
+        dispBody.addView(screen, sp);
+        screen.setInput(new ScreenView.Input() {
+            @Override public void move(int x, int y) { queueMove(x, y); }
+            @Override public void button(String type, String button, int x, int y) {
+                pendingMove.set(null);
+                sendInput(event(type).put2("button", button).put2("x", x).put2("y", y));
+            }
+            @Override public void scroll(int dy, int x, int y) {
+                sendInput(event("scroll").put2("dy", dy).put2("x", x).put2("y", y));
+            }
+        });
+
+        LinearLayout typeRow = a.horizontal();
+        typeRow.setGravity(Gravity.CENTER_VERTICAL);
+        typeField = a.input("", "Type text for the board", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
+        typeField.setImeOptions(EditorInfo.IME_ACTION_SEND);
+        typeRow.addView(typeField, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        Button send = a.button("Send", MainActivity.ACCENT);
+        LinearLayout.LayoutParams bl = new LinearLayout.LayoutParams(a.dp(76), a.dp(46));
+        bl.leftMargin = a.dp(6);
+        typeRow.addView(send, bl);
+        fpsText = a.text("", 12, MainActivity.MUTED);
+        fpsText.setPadding(a.dp(8), 0, 0, 0);
+        typeRow.addView(fpsText);
+        dispBody.addView(typeRow);
+        View.OnClickListener doSend = new View.OnClickListener() {
+            @Override public void onClick(View v) { sendTyped(); }
+        };
+        send.setOnClickListener(doSend);
+        typeField.setOnEditorActionListener(new TextView.OnEditorActionListener() {
+            @Override public boolean onEditorAction(TextView v, int id, KeyEvent e) {
+                if (id == EditorInfo.IME_ACTION_SEND) { sendTyped(); return true; }
+                return false;
+            }
+        });
+
+        TextView help = a.text("Tap = click · hold = right-click · drag = drag · two fingers = scroll. "
+                + "Turn your phone sideways for a bigger screen.", 12, MainActivity.MUTED);
+        help.setPadding(a.dp(4), a.dp(4), 0, 0);
+        dispBody.addView(help);
+
+        dispLock.setVisibility(View.VISIBLE);
+        dispBody.setVisibility(View.GONE);
+        return root;
+    }
+
+    private void addKey(LinearLayout row, Button b, final String key) {
+        b.setTextSize(13);
+        b.setPadding(a.dp(12), 0, a.dp(12), 0);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, a.dp(40));
+        lp.rightMargin = a.dp(5);
+        row.addView(b, lp);
+        if (key != null) b.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) { sendInput(event("key").put2("keys", key)); }
+        });
+    }
+
+    private void sendTyped() {
+        String t = typeField.getText().toString();
+        if (t.isEmpty()) return;
+        typeField.setText("");
+        sendInput(event("type").put2("text", t));
+    }
+
+    /** JSONObject whose put returns itself without a checked exception. */
+    private static final class Ev extends JSONObject {
+        Ev put2(String k, Object v) {
+            try { put(k, v); } catch (org.json.JSONException ignored) {}
+            return this;
+        }
+    }
+
+    private static Ev event(String type) { return new Ev().put2("type", type); }
+
+    private void sendInput(final JSONObject ev) {
+        final String host = a.boardHost();
+        inputExec.execute(new Runnable() {
+            @Override public void run() {
+                try {
+                    Api.agent(host, "/api/screen/input", pin, ev, 10000);
+                } catch (final Exception e) {
+                    ui.post(new Runnable() {
+                        @Override public void run() {
+                            if (e instanceof Api.WrongPin) setUnlocked(false);
+                            else toast("Input: " + e.getMessage());
+                        }
+                    });
+                }
+            }
+        });
+    }
+
+    /** Mouse moves are merged: only the newest position is sent when the line is free. */
+    private void queueMove(int x, int y) {
+        pendingMove.set(new int[]{x, y});
+        if (!moveQueued.compareAndSet(false, true)) return;
+        final String host = a.boardHost();
+        inputExec.execute(new Runnable() {
+            @Override public void run() {
+                moveQueued.set(false);
+                int[] m = pendingMove.getAndSet(null);
+                if (m == null) return;
+                try {
+                    Api.agent(host, "/api/screen/input", pin, event("move").put2("x", m[0]).put2("y", m[1]), 5000);
+                } catch (Exception ignored) {
+                }
+            }
+        });
+    }
+
+    private void startScreen() {
+        if (screenRunning) return;
+        screenRunning = true;
+        final int gen = ++screenGen;
+        final String host = a.boardHost();
+        new Thread(new Runnable() {
+            @Override public void run() {
+                int frames = 0;
+                long last = System.currentTimeMillis();
+                while (screenRunning && gen == screenGen) {
+                    try {
+                        int[] qv = QUALITY[quality];
+                        Api.Frame f = Api.screen(host, pin, qv[0], qv[1]);
+                        final android.graphics.Bitmap bmp = android.graphics.BitmapFactory.decodeByteArray(f.jpeg, 0, f.jpeg.length);
+                        final int sw = f.screenW, sh = f.screenH;
+                        frames++;
+                        long now = System.currentTimeMillis();
+                        final String fps = now - last >= 1000 ? frames + " fps" : null;
+                        if (fps != null) { frames = 0; last = now; }
+                        ui.post(new Runnable() {
+                            @Override public void run() {
+                                if (bmp != null) screen.showFrame(bmp, sw, sh);
+                                if (fps != null) fpsText.setText(fps);
+                            }
+                        });
+                    } catch (final Exception e) {
+                        ui.post(new Runnable() {
+                            @Override public void run() {
+                                if (e instanceof Api.WrongPin) { setUnlocked(false); return; }
+                                screen.showMessage(e.getMessage());
+                                fpsText.setText("");
+                            }
+                        });
+                        if (e instanceof Api.WrongPin) break;
+                        try { Thread.sleep(2000); } catch (InterruptedException ie) { break; }
+                    }
+                }
+                if (gen == screenGen) screenRunning = false;
+            }
+        }).start();
     }
 }

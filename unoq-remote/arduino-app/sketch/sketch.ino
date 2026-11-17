@@ -2,6 +2,13 @@
 // Exposes simple pin functions to the Linux side through the Arduino Bridge.
 
 #include <Arduino_RouterBridge.h>
+#include <Arduino_LED_Matrix.h>
+#include <vector>
+
+// 8 x 13 LED matrix, one brightness byte (0-255) per LED, row by row.
+Arduino_LED_Matrix matrix;
+static const uint8_t MATRIX_SIZE = 8 * 13;
+uint8_t matrixFrame[MATRIX_SIZE] = {0};
 
 struct PinEntry { const char* name; uint8_t pin; };
 
@@ -66,7 +73,17 @@ bool rgb(int led, int r, int g, int b) {
   return true;
 }
 
+bool draw(std::vector<uint8_t> frame) {
+  size_t n = min(frame.size(), (size_t)MATRIX_SIZE);
+  memcpy(matrixFrame, frame.data(), n);
+  return true;
+}
+
 void setup() {
+  matrix.begin();
+  matrix.setGrayscaleBits(8);  // brightness 0-255
+  matrix.clear();
+
   for (int i = 0; i < 6; ++i) {
     pinMode(LED_BUILTIN + i, OUTPUT);
     digitalWrite(LED_BUILTIN + i, HIGH);  // off
@@ -79,6 +96,10 @@ void setup() {
   Bridge.provide("pwm", pwm);
   Bridge.provide("aread", aread);
   Bridge.provide("rgb", rgb);
+  Bridge.provide("draw", draw);
 }
 
-void loop() {}
+void loop() {
+  matrix.draw(matrixFrame);
+  delay(10);
+}

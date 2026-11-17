@@ -131,8 +131,9 @@ public class MainActivity extends Activity {
     // ------------------------------------------------------------------ UI building
 
     private AgentPages agent;
-    private final View[] pages = new View[3];
-    private final Button[] tabs = new Button[3];
+    private static final int TABS = 4;
+    private final View[] pages = new View[TABS];
+    private final Button[] tabs = new Button[TABS];
     private int currentTab;
 
     /** Host to use for the agent: the connected board, or whatever is typed in. */
@@ -151,18 +152,20 @@ public class MainActivity extends Activity {
         pages[0] = buildPinsPage();
         pages[1] = agent.buildSystemPage();
         pages[2] = agent.buildTerminalPage();
+        pages[3] = agent.buildDisplayPage();
         for (View v : pages) content.addView(v, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
         LinearLayout bar = horizontal();
         bar.setBackgroundColor(CARD);
         bar.setPadding(dp(8), dp(6), dp(8), dp(6));
-        String[] names = {"Pins", "System", "Terminal"};
-        for (int i = 0; i < 3; i++) {
+        String[] names = {"Pins", "System", "Terminal", "Display"};
+        for (int i = 0; i < TABS; i++) {
             final int idx = i;
             Button b = button(names[i], CARD);
             tabs[i] = b;
+            b.setTextSize(14);
             LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, dp(46), 1f);
-            lp.leftMargin = lp.rightMargin = dp(4);
+            lp.leftMargin = lp.rightMargin = dp(3);
             bar.addView(b, lp);
             b.setOnClickListener(new View.OnClickListener() {
                 @Override public void onClick(View v) { showTab(idx); }
@@ -176,7 +179,7 @@ public class MainActivity extends Activity {
     private void showTab(int i) {
         hideKeyboard();
         currentTab = i;
-        for (int k = 0; k < 3; k++) {
+        for (int k = 0; k < TABS; k++) {
             pages[k].setVisibility(k == i ? View.VISIBLE : View.GONE);
             tabs[k].setBackground(round(k == i ? ACCENT : CARD, dp(8)));
             tabs[k].setTextColor(k == i ? Color.WHITE : MUTED);
@@ -210,6 +213,7 @@ public class MainActivity extends Activity {
         controls = vertical();
         root.addView(controls);
         controls.addView(buildLedCard());
+        controls.addView(buildMatrixCard());
         controls.addView(buildDigitalCard());
         controls.addView(buildPwmCard());
         controls.addView(buildAnalogCard());
@@ -310,6 +314,103 @@ public class MainActivity extends Activity {
             card.addView(row);
         }
         return card;
+    }
+
+    // ------------------------------------------------------------------ LED matrix
+
+    private static final String[][] PRESETS = {
+        {"Heart", "................##...##.....####.####....#########.....#######.......#####.........###...........#......"},
+        {"Smile", "....#####.......#.....#.....#.#...#.#....#.......#....#.#...#.#....#..###..#.....#.....#.......#####...."},
+        {"Arrow", "...................#...........###.........#####.......#######.........#............#..................."},
+    };
+    private MatrixView matrixView;
+    private String matrixPending;
+    private boolean matrixSending;
+
+    private View buildMatrixCard() {
+        LinearLayout card = card("LED matrix (13 × 8)");
+        TextView hint = text("Tap or drag to draw. Tap a lit LED to erase.", 13, MUTED);
+        hint.setPadding(0, 0, 0, dp(8));
+        card.addView(hint);
+        matrixView = new MatrixView(this);
+        card.addView(matrixView, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        matrixView.setListener(new MatrixView.Listener() {
+            @Override public void changed(String frame) { if (!syncing) sendMatrix(frame); }
+        });
+
+        LinearLayout bright = horizontal();
+        bright.setGravity(Gravity.CENTER_VERTICAL);
+        bright.setPadding(0, dp(10), 0, 0);
+        bright.addView(text("Brightness", 14, TEXT), new LinearLayout.LayoutParams(dp(90), ViewGroup.LayoutParams.WRAP_CONTENT));
+        SeekBar sb = new SeekBar(this);
+        sb.setMax(6);
+        sb.setProgress(6);
+        sb.setProgressTintList(ColorStateList.valueOf(ACCENT));
+        sb.setThumbTintList(ColorStateList.valueOf(ACCENT));
+        bright.addView(sb, new LinearLayout.LayoutParams(0, dp(40), 1f));
+        sb.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override public void onProgressChanged(SeekBar s, int p, boolean u) { matrixView.setBrush(p + 1); }
+            @Override public void onStartTrackingTouch(SeekBar s) {}
+            @Override public void onStopTrackingTouch(SeekBar s) {}
+        });
+        card.addView(bright);
+
+        LinearLayout row1 = horizontal();
+        row1.setPadding(0, dp(6), 0, 0);
+        addMatrixButton(row1, "Clear", new Runnable() { @Override public void run() { matrixView.fill(0); } });
+        addMatrixButton(row1, "Fill", new Runnable() { @Override public void run() { matrixView.fill(7); } });
+        addMatrixButton(row1, "Invert", new Runnable() { @Override public void run() { matrixView.invert(); } });
+        card.addView(row1);
+        LinearLayout row2 = horizontal();
+        row2.setPadding(0, dp(6), 0, 0);
+        for (final String[] p : PRESETS) {
+            addMatrixButton(row2, p[0], new Runnable() { @Override public void run() { matrixView.load(p[1], true); } });
+        }
+        card.addView(row2);
+        return card;
+    }
+
+    private void addMatrixButton(LinearLayout row, String label, final Runnable action) {
+        Button b = button(label, CARD_2);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, dp(42), 1f);
+        if (row.getChildCount() > 0) lp.leftMargin = dp(6);
+        row.addView(b, lp);
+        b.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) { action.run(); }
+        });
+    }
+
+    /** Sends the newest drawing; while one send is in flight, later ones are merged. */
+    private void sendMatrix(String frame) {
+        if (!connected) return;
+        matrixPending = frame;
+        if (matrixSending) return;
+        matrixSending = true;
+        cmd.execute(new Runnable() {
+            @Override public void run() {
+                while (true) {
+                    final String[] f = new String[1];
+                    final java.util.concurrent.CountDownLatch got = new java.util.concurrent.CountDownLatch(1);
+                    ui.post(new Runnable() {
+                        @Override public void run() {
+                            f[0] = matrixPending;
+                            matrixPending = null;
+                            if (f[0] == null) matrixSending = false;
+                            got.countDown();
+                        }
+                    });
+                    try { got.await(); } catch (InterruptedException e) { return; }
+                    if (f[0] == null) return;
+                    try {
+                        Api.get(host, port, "/api/matrix", 2500, "frame", f[0]);
+                    } catch (final Exception e) {
+                        ui.post(new Runnable() {
+                            @Override public void run() { toastStatus("LED matrix failed: " + e.getMessage(), false); }
+                        });
+                    }
+                }
+            }
+        });
     }
 
     private View buildDigitalCard() {
@@ -515,6 +616,8 @@ public class MainActivity extends Activity {
             }
             JSONObject pwm = st.optJSONObject("pwm");
             if (pwm != null) for (String pin : PWM) pwmBars.get(pin).setProgress(pwm.optInt(pin));
+            String m = st.optString("matrix", "");
+            if (m.length() == MatrixView.W * MatrixView.H) matrixView.load(m, false);
             for (int led = 3; led <= 4; led++) {
                 JSONArray a = st.optJSONArray("led" + led);
                 if (a != null) for (int c = 0; c < 3; c++) ledState[led][c] = a.optInt(c);

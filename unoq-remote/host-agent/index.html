@@ -70,6 +70,13 @@
            padding: 10px 16px; border-radius: 10px; opacity: 0; transition: opacity .3s; pointer-events: none; }
   #toast.show { opacity: 1; }
   .lock { text-align: center; padding: 30px 10px; }
+  .notice { background: var(--card); border-left: 4px solid var(--accent); border-radius: 10px; padding: 10px 14px; margin-bottom: 14px; }
+  .tools { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: 10px; }
+  .tools input { width: 220px; }
+  #screenWrap { background: #000; border-radius: 10px; overflow: hidden; display: flex; justify-content: center; }
+  #screen { max-width: 100%; max-height: 78vh; display: block; cursor: default; outline: none; }
+  #screen:focus { box-shadow: 0 0 0 2px var(--accent); }
+  #screenWrap:fullscreen #screen { max-height: 100vh; }
   .lock input { width: 180px; text-align: center; letter-spacing: 3px; }
   @media (max-width: 600px) { header { padding: 12px 16px; } .wrap { padding: 12px 16px; } }
 </style>
@@ -81,6 +88,7 @@
     <button class="tab on" data-tab="pins">Pins</button>
     <button class="tab" data-tab="system">System</button>
     <button class="tab" data-tab="terminal">Terminal</button>
+    <button class="tab" data-tab="display">Display</button>
   </div>
   <div class="conn">
     <span class="dot" id="dot"></span>
@@ -93,8 +101,8 @@
   <!-- ============ PINS ============ -->
   <section id="tab-pins">
     <p class="muted" id="pinsStatus">Pins come from the UNO Q Remote App Lab app (port 7000).</p>
+    <div class="notice">💡 The RGB LEDs and the LED matrix can only be controlled from the phone app.</div>
     <div class="grid">
-      <div class="card"><h2>Built-in RGB LEDs</h2><div id="leds"></div></div>
       <div class="card"><h2>PWM outputs (0–255)</h2><div id="pwm"></div></div>
       <div class="card"><h2>Analog inputs</h2><div id="analog"></div></div>
       <div class="card"><h2>Digital pins</h2>
@@ -143,6 +151,29 @@ Press ↑/↓ for history.
     </div>
   </section>
 </div>
+  <!-- ============ DISPLAY ============ -->
+  <section id="tab-display" class="hidden wrap">
+    <div class="card lock hidden" id="lockDisplay"></div>
+    <div id="displayBody" class="hidden">
+      <div class="tools">
+        <select id="quality" title="Picture quality">
+          <option value="960:45">Fast</option><option value="1280:60" selected>Normal</option><option value="1920:80">Sharp</option>
+        </select>
+        <button class="b" data-key="Escape">Esc</button>
+        <button class="b" data-key="Tab">Tab</button>
+        <button class="b" data-key="super">⊞ Menu</button>
+        <button class="b" data-key="ctrl+c">Ctrl+C</button>
+        <button class="b" data-key="ctrl+v">Ctrl+V</button>
+        <button class="b" data-key="alt+F4">Alt+F4</button>
+        <button class="b" data-key="ctrl+alt+t">New terminal</button>
+        <input id="typeText" placeholder="Type text, then Enter">
+        <button class="b" id="fullscreen">Full screen</button>
+        <span class="muted" id="fps"></span>
+      </div>
+      <div id="screenWrap"><canvas id="screen" tabindex="0" width="1280" height="720"></canvas></div>
+      <p class="muted">Click the picture, then use your mouse and keyboard as if you were at the board. Right-click and the scroll wheel work too.</p>
+    </div>
+  </section>
 <div id="toast"></div>
 
 <script>
@@ -159,7 +190,7 @@ const store = {
 let host = store.get("host", location.hostname || "");
 let pin = store.get("pin", "");
 let pinsOk = false, agentOk = false, tab = "pins";
-const modes = {}, out = {}, leds = {3: [0, 0, 0], 4: [0, 0, 0]};
+const modes = {}, out = {};
 DIGITAL.forEach(p => modes[p] = "input");
 
 const pinsBase = () => location.port === "7000" && location.hostname === host ? "" : `http://${host}:7000`;
@@ -192,22 +223,6 @@ function sw(onChange) {
   l.querySelector("input").addEventListener("change", e => onChange(e.target.checked));
   return l;
 }
-for (const n of [3, 4]) {
-  const row = document.createElement("div"); row.className = "row";
-  row.innerHTML = `<span class="name">LED${n}</span>`;
-  ["r", "g", "bl"].forEach((c, i) => {
-    const b = document.createElement("button"); b.className = `b led ${c}`; b.textContent = "RGB"[i];
-    b.id = `led${n}${i}`;
-    b.onclick = () => { leds[n][i] ^= 1; paintLeds(); sendLed(n); };
-    row.appendChild(b);
-  });
-  const off = document.createElement("button"); off.className = "b"; off.textContent = "Off";
-  off.onclick = () => { leds[n] = [0, 0, 0]; paintLeds(); sendLed(n); };
-  row.appendChild(off); $("#leds").appendChild(row);
-}
-function paintLeds() { for (const n of [3, 4]) for (let i = 0; i < 3; i++) $(`#led${n}${i}`).classList.toggle("on", !!leds[n][i]); }
-function sendLed(n) { const [r, g, b] = leds[n]; pinsApi("/api/led", {led: n, r, g, b}).catch(e => toast("LED: " + e.message)); }
-
 const pwmLast = {};
 for (const p of PWM) {
   const row = document.createElement("div"); row.className = "row";
@@ -248,8 +263,6 @@ DIGITAL.forEach(paintDigital);
 function applyState(st) {
   for (const p of DIGITAL) { modes[p] = st.modes?.[p] || "input"; out[p] = st.out?.[p] || 0; paintDigital(p); }
   for (const p of PWM) { const v = st.pwm?.[p] || 0; $(`#pwm${p}`).value = v; $(`#pwmv${p}`).textContent = v; }
-  for (const n of [3, 4]) if (st["led" + n]) leds[n] = st["led" + n];
-  paintLeds();
 }
 
 // ---------------------------------------------------------------- connect & polling
@@ -285,7 +298,7 @@ setInterval(pollPins, 700);
 
 // ---------------------------------------------------------------- PIN lock
 function showLocks() {
-  for (const name of ["System", "Terminal"]) {
+  for (const name of ["System", "Terminal", "Display"]) {
     const lock = $("#lock" + name), body = $("#" + name.toLowerCase() + "Body");
     lock.classList.toggle("hidden", agentOk); body.classList.toggle("hidden", !agentOk);
     if (!agentOk) lock.innerHTML = `<h2>Unlock the board's system controls</h2>
@@ -383,12 +396,98 @@ $("#cmd").onkeydown = e => {
   else if (e.key === "ArrowDown") { hi = Math.min(hist.length, hi + 1); $("#cmd").value = hist[hi] || ""; e.preventDefault(); }
 };
 
+// ---------------------------------------------------------------- display
+let screenW = 0, screenH = 0, screenRunning = false, frames = 0, lastFps = Date.now();
+const canvas = $("#screen"), ctx2d = canvas.getContext("2d");
+async function startScreen() {
+  if (screenRunning) return;
+  screenRunning = true;
+  while (tab === "display" && agentOk) {
+    const [w, q] = $("#quality").value.split(":");
+    try {
+      const r = await fetch(`${agentBase()}/api/screen/frame?w=${w}&q=${q}`, {headers: {"X-Pin": pin}, cache: "no-store"});
+      if (r.status === 401) { agentOk = false; showLocks(); break; }
+      if ((r.headers.get("Content-Type") || "").includes("json")) {
+        const j = await r.json(); throw new Error(j.error || "no picture");
+      }
+      screenW = +r.headers.get("X-Screen-W"); screenH = +r.headers.get("X-Screen-H");
+      const bmp = await createImageBitmap(await r.blob());
+      if (canvas.width !== bmp.width || canvas.height !== bmp.height) { canvas.width = bmp.width; canvas.height = bmp.height; }
+      ctx2d.drawImage(bmp, 0, 0); bmp.close && bmp.close();
+      frames++;
+      if (Date.now() - lastFps > 1000) { $("#fps").textContent = frames + " fps"; frames = 0; lastFps = Date.now(); }
+    } catch (e) {
+      ctx2d.fillStyle = "#000"; ctx2d.fillRect(0, 0, canvas.width, canvas.height);
+      ctx2d.fillStyle = "#e8edf2"; ctx2d.font = "20px system-ui"; ctx2d.textAlign = "center";
+      ctx2d.fillText(e.message, canvas.width / 2, canvas.height / 2, canvas.width - 40);
+      $("#fps").textContent = "";
+      await new Promise(r => setTimeout(r, 2000));
+    }
+  }
+  screenRunning = false;
+}
+
+// input is sent in order; mouse moves are merged so they never pile up
+let inputChain = Promise.resolve(), pendingMove = null, moveBusy = false;
+function sendInput(ev) {
+  inputChain = inputChain.then(() => agentApi("/api/screen/input", ev)).catch(e => toast("Input: " + e.message));
+}
+function sendMove(ev) {
+  pendingMove = ev; if (moveBusy) return;
+  moveBusy = true;
+  const loop = () => { const m = pendingMove; pendingMove = null;
+    if (!m) { moveBusy = false; return; }
+    inputChain = inputChain.then(() => agentApi("/api/screen/input", m)).catch(() => {}).then(() => setTimeout(loop, 25)); };
+  loop();
+}
+function toScreen(e) {
+  const r = canvas.getBoundingClientRect();
+  return {x: Math.round((e.clientX - r.left) / r.width * (screenW || canvas.width)),
+          y: Math.round((e.clientY - r.top) / r.height * (screenH || canvas.height))};
+}
+const BTN = ["left", "middle", "right"];
+canvas.addEventListener("mousemove", e => { if (screenW) sendMove({type: "move", ...toScreen(e)}); });
+canvas.addEventListener("mousedown", e => { canvas.focus(); e.preventDefault(); pendingMove = null;
+  sendInput({type: "down", button: BTN[e.button] || "left", ...toScreen(e)}); });
+canvas.addEventListener("mouseup", e => { e.preventDefault(); pendingMove = null;
+  sendInput({type: "up", button: BTN[e.button] || "left", ...toScreen(e)}); });
+canvas.addEventListener("contextmenu", e => e.preventDefault());
+let wheelAcc = 0;
+canvas.addEventListener("wheel", e => { e.preventDefault(); wheelAcc += e.deltaY;
+  const steps = Math.trunc(wheelAcc / 60); if (steps) { wheelAcc -= steps * 60; sendInput({type: "scroll", dy: steps, ...toScreen(e)}); } },
+  {passive: false});
+
+const SPECIAL = {Enter: "Return", Backspace: "BackSpace", Tab: "Tab", Escape: "Escape", Delete: "Delete",
+  ArrowUp: "Up", ArrowDown: "Down", ArrowLeft: "Left", ArrowRight: "Right", Home: "Home", End: "End",
+  PageUp: "Page_Up", PageDown: "Page_Down", Insert: "Insert", Meta: "super", OS: "super", ContextMenu: "Menu"};
+for (let i = 1; i <= 12; i++) SPECIAL["F" + i] = "F" + i;
+canvas.addEventListener("keydown", e => {
+  if (["Control", "Shift", "Alt", "AltGraph", "CapsLock"].includes(e.key)) return;
+  e.preventDefault();
+  const mods = [e.ctrlKey && "ctrl", e.altKey && "alt", e.metaKey && e.key !== "Meta" && "super"].filter(Boolean);
+  if (SPECIAL[e.key]) {
+    if (e.shiftKey) mods.push("shift");
+    sendInput({type: "key", keys: [...mods, SPECIAL[e.key]].join("+")});
+  } else if (e.key.length === 1) {
+    if (mods.length && /^[a-zA-Z0-9]$/.test(e.key)) sendInput({type: "key", keys: [...mods, e.key.toLowerCase()].join("+")});
+    else if (!mods.length) sendInput({type: "type", text: e.key});
+  }
+});
+document.querySelectorAll("[data-key]").forEach(b => b.onclick = () => { sendInput({type: "key", keys: b.dataset.key}); canvas.focus(); });
+$("#typeText").onkeydown = e => { if (e.key === "Enter" && e.target.value) { sendInput({type: "type", text: e.target.value}); e.target.value = ""; } };
+$("#fullscreen").onclick = () => { const w = $("#screenWrap");
+  (document.fullscreenElement ? document.exitFullscreen() : w.requestFullscreen()).catch(() => {}); canvas.focus(); };
+
 // ---------------------------------------------------------------- tabs
-function refreshTab() { if (tab === "system" && agentOk) { loadInfo(); loadProcs(); } if (tab === "terminal" && agentOk) $("#cmd").focus(); }
+function refreshTab() {
+  if (tab === "system" && agentOk) { loadInfo(); loadProcs(); }
+  if (tab === "terminal" && agentOk) $("#cmd").focus();
+  if (tab === "display" && agentOk) startScreen();
+}
 document.querySelectorAll(".tab").forEach(b => b.onclick = () => {
   tab = b.dataset.tab;
   document.querySelectorAll(".tab").forEach(x => x.classList.toggle("on", x === b));
-  for (const t of ["pins", "system", "terminal"]) $("#tab-" + t).classList.toggle("hidden", t !== tab);
+  for (const t of ["pins", "system", "terminal", "display"]) $("#tab-" + t).classList.toggle("hidden", t !== tab);
   refreshTab();
 });
 $("#host").value = host; $("#connect").onclick = connect;

@@ -23,6 +23,7 @@ final class Api {
         c.setConnectTimeout(timeoutMs);
         c.setReadTimeout(Math.max(timeoutMs, 3000));
         c.setUseCaches(false);
+        c.setRequestProperty("X-UnoQ-Client", "android");   // LEDs only accept the phone app
         try {
             int code = c.getResponseCode();
             InputStream in = code >= 400 ? c.getErrorStream() : c.getInputStream();
@@ -68,6 +69,47 @@ final class Api {
             JSONObject json = new JSONObject(text);
             if (!json.optBoolean("ok", true)) throw new Exception(json.optString("error", "agent error"));
             return json;
+        } catch (java.net.ConnectException e) {
+            throw new Exception("can't reach the agent on " + host + ":" + AGENT_PORT + " - is it installed?");
+        } finally {
+            c.disconnect();
+        }
+    }
+
+    /** One JPEG picture of the board's desktop plus the real screen size. */
+    static final class Frame {
+        byte[] jpeg;
+        int screenW, screenH;
+    }
+
+    static Frame screen(String host, String pin, int width, int quality) throws Exception {
+        if (host == null) throw new Exception("enter the board's address on the Pins tab first");
+        HttpURLConnection c = (HttpURLConnection) new URL("http://" + host + ":" + AGENT_PORT
+                + "/api/screen/frame?w=" + width + "&q=" + quality).openConnection();
+        c.setConnectTimeout(4000);
+        c.setReadTimeout(10000);
+        c.setUseCaches(false);
+        c.setRequestProperty("X-Pin", pin == null ? "" : pin);
+        try {
+            int code = c.getResponseCode();
+            if (code == 401) throw new WrongPin();
+            String type = c.getContentType();
+            if (type == null || !type.startsWith("image/")) {
+                InputStream in = code >= 400 ? c.getErrorStream() : c.getInputStream();
+                JSONObject j = new JSONObject(in == null ? "{}" : readAll(in));
+                throw new Exception(j.optString("error", "no picture from the board"));
+            }
+            Frame f = new Frame();
+            InputStream in = c.getInputStream();
+            ByteArrayOutputStream out = new ByteArrayOutputStream();
+            byte[] buf = new byte[16384];
+            int n;
+            while ((n = in.read(buf)) > 0) out.write(buf, 0, n);
+            in.close();
+            f.jpeg = out.toByteArray();
+            f.screenW = c.getHeaderFieldInt("X-Screen-W", 0);
+            f.screenH = c.getHeaderFieldInt("X-Screen-H", 0);
+            return f;
         } catch (java.net.ConnectException e) {
             throw new Exception("can't reach the agent on " + host + ":" + AGENT_PORT + " - is it installed?");
         } finally {

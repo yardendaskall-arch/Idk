@@ -4,6 +4,7 @@
 
 import functools
 import threading
+from fastapi import Request
 from arduino.app_utils import App, Bridge
 from arduino.app_bricks.web_ui import WebUI
 
@@ -19,7 +20,9 @@ state = {
     "pwm": {p: 0 for p in PWM},
     "led3": [0, 0, 0],
     "led4": [0, 0, 0],
+    "matrix": "0" * 104,   # 8 rows x 13 columns, brightness 0-7 per LED
 }
+MATRIX_W, MATRIX_H = 13, 8
 
 
 def _call(name, *args):
@@ -32,6 +35,18 @@ def _pin(pin: str, allowed) -> str:
     if p not in allowed:
         raise ValueError(f"unknown pin {pin!r}")
     return p
+
+
+def _phone_only(request: Request):
+    """LEDs may only be changed from the Android app, never from a web browser.
+
+    Browsers always add Sec-Fetch-* headers (and Origin on cross-site calls) and page
+    scripts cannot remove them; the app sends none of them and identifies itself.
+    """
+    h = request.headers
+    if (h.get("x-unoq-client") != "android" or h.get("origin")
+            or h.get("sec-fetch-mode") or h.get("sec-fetch-site")):
+        raise PermissionError("LEDs can only be controlled from the phone app")
 
 
 def _safe(fn):
@@ -114,13 +129,25 @@ def analog_read_all():
 
 
 @_safe
-def led(led: int, r: int = 0, g: int = 0, b: int = 0):
+def led(request: Request, led: int, r: int = 0, g: int = 0, b: int = 0):
+    _phone_only(request)
     if led not in (3, 4):
         raise ValueError("led must be 3 or 4")
     rgb = [1 if r else 0, 1 if g else 0, 1 if b else 0]
     _call("rgb", led, *rgb)
     state[f"led{led}"] = rgb
     return {"led": led, "rgb": rgb}
+
+
+@_safe
+def matrix(request: Request, frame: str):
+    """frame: 104 digits 0-7, row by row (8 rows x 13 columns)."""
+    _phone_only(request)
+    if len(frame) != MATRIX_W * MATRIX_H or any(c not in "01234567" for c in frame):
+        raise ValueError("frame must be 104 digits from 0 to 7")
+    _call("draw", bytes(int(c) * 255 // 7 for c in frame))
+    state["matrix"] = frame
+    return {"frame": frame}
 
 
 ui = WebUI()
@@ -135,6 +162,7 @@ for path, fn in [
     ("/api/analog/read", analog_read),
     ("/api/analog/all", analog_read_all),
     ("/api/led", led),
+    ("/api/matrix", matrix),
 ]:
     ui.expose_api("GET", path, fn)
 

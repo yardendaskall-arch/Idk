@@ -19,11 +19,14 @@ There are two parts on the board:
 
 ## Phone app tabs
 
-- **Pins**: built-in RGB LEDs (LED3, LED4), D0–D13 (IN / OUT / PULL-UP, on/off, live input readings), PWM sliders on D3/D5/D6/D9/D10/D11, live analog A0–A5.
+- **Pins**: built-in RGB LEDs (LED3, LED4), the **13 × 8 LED matrix** (draw with your finger, brightness, presets), D0–D13 (IN / OUT / PULL-UP, on/off, live input readings), PWM sliders on D3/D5/D6/D9/D10/D11, live analog A0–A5.
 - **System**: hostname, OS, uptime, CPU / RAM / disk use, temperature, IP addresses, Wi-Fi scan and connect, process list with Stop, Reboot, Shut down.
 - **Terminal**: run commands on the board's Linux. It keeps track of `cd`, has history (↑ ↓) and shortcut keys.
+- **Display**: see the board's desktop live and control it. Tap = click, hold = right-click, drag = drag, two fingers = scroll, plus a key bar and a text box for typing.
 
-The web panel has the same three tabs.
+The web panel has Pins (without LEDs), System, Terminal and **Display**, where your computer's real mouse and keyboard control the board.
+
+**The LEDs (RGB and matrix) can only be controlled from the phone app.** The board refuses LED commands that come from any web browser.
 
 ---
 
@@ -56,7 +59,7 @@ You need a command line on the board's Linux. On a PC that's connected to the bo
    If it asks for a password, it's the board password you chose when setting up the UNO Q in App Lab.
 4. It prints a **PIN**. Write it down. You need it in the app and the web panel.
 
-The agent starts automatically every time the board boots. It needs nothing from the internet.
+The agent starts automatically every time the board boots. If the board has internet during the install, it also installs `python3-pil` and `xdotool`, which the **Display** tab needs. To update the agent later, push the new files and run the same install command again. Your PIN stays the same.
 
 - Show the PIN again (inside `adb shell`): `sudo python3 /opt/unoq-agent/unoq_agent.py --pin`
 - Remove the agent: `sudo python3 /opt/unoq-agent/unoq_agent.py --uninstall`
@@ -98,7 +101,8 @@ From a computer on the same network, open `http://<board-ip>:7000` (or `:7001`).
 | `/api/digital/read`, `/api/digital/all` | `pin` (read only) |
 | `/api/pwm` | `pin` (D3, D5, D6, D9, D10, D11), `value` 0–255 |
 | `/api/analog/read`, `/api/analog/all` | `pin` (A0–A5, read only) |
-| `/api/led` | `led` 3 or 4, `r`, `g`, `b` 0/1 |
+| `/api/led` | `led` 3 or 4, `r`, `g`, `b` 0/1 (phone app only) |
+| `/api/matrix` | `frame` = 104 digits 0–7, row by row, 13 per row (phone app only) |
 
 **Port 7001 (agent).** Send the header `X-Pin: <PIN>`. POST bodies are JSON.
 
@@ -111,6 +115,8 @@ From a computer on the same network, open `http://<board-ip>:7000` (or `:7001`).
 | `/api/os/wifi/scan` | GET | nearby networks |
 | `/api/os/wifi/connect` | POST | `{"ssid": "...", "password": "..."}` |
 | `/api/os/power` | POST | `{"action": "reboot"}` or `"shutdown"` |
+| `/api/screen/frame` | GET | `?w=1280&q=60` returns a JPEG of the desktop, with headers `X-Screen-W` and `X-Screen-H` |
+| `/api/screen/input` | POST | `{"type": "click", "x": 10, "y": 20, "button": "left"}`. Types: move, down, up, click, scroll (`dy`), key (`keys`, e.g. `ctrl+c`), type (`text`) |
 | `/api/term/exec` | POST | `{"cmd": "ls -la", "cwd": "/home/arduino", "timeout": 60}` returns output, exit code and new cwd |
 
 ## Rebuilding the APK
