@@ -1,0 +1,399 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>UNO Q Remote</title>
+<style>
+  :root {
+    --bg: #101418; --card: #1b2128; --card2: #242c35; --text: #e8edf2; --muted: #8a96a3;
+    --accent: #00979d; --ok: #2ecc71; --bad: #e74c3c; --term: #0b0e11;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 15px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  header { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between;
+           padding: 14px 20px; border-bottom: 1px solid var(--card2); position: sticky; top: 0;
+           background: var(--bg); z-index: 5; }
+  h1 { font-size: 20px; margin: 0; }
+  h2 { font-size: 16px; margin: 0 0 10px; }
+  .wrap { max-width: 1100px; margin: 0 auto; padding: 16px; }
+  .tabs { display: flex; gap: 6px; }
+  .tab { background: var(--card); color: var(--muted); border: 0; padding: 8px 16px; border-radius: 8px;
+         cursor: pointer; font: inherit; }
+  .tab.on { background: var(--accent); color: #fff; }
+  .conn { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--muted); display: inline-block; }
+  input, select { background: var(--card2); color: var(--text); border: 1px solid transparent; border-radius: 8px;
+                  padding: 8px 10px; font: inherit; min-width: 0; }
+  input:focus { outline: none; border-color: var(--accent); }
+  button.b { background: var(--card2); color: var(--text); border: 0; border-radius: 8px; padding: 8px 14px;
+             cursor: pointer; font: inherit; }
+  button.b:hover { filter: brightness(1.2); }
+  button.p { background: var(--accent); }
+  button.danger { background: #8e2b22; }
+  .grid { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); }
+  .card { background: var(--card); border-radius: 14px; padding: 14px 16px; }
+  .row { display: flex; align-items: center; gap: 8px; padding: 4px 0; }
+  .row .name { width: 56px; font-family: ui-monospace, Consolas, monospace; font-weight: 700; }
+  .row .grow { flex: 1; }
+  .val { font-family: ui-monospace, Consolas, monospace; min-width: 52px; text-align: right; }
+  .muted { color: var(--muted); font-size: 13px; }
+  .bar { height: 10px; background: var(--card2); border-radius: 5px; overflow: hidden; flex: 1; }
+  .bar > i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .3s; }
+  .led { width: 46px; }
+  .led.on.r { background: #e53935; } .led.on.g { background: #43a047; } .led.on.bl { background: #1e88e5; }
+  .mode.out { background: var(--accent); }
+  .sw { position: relative; display: inline-block; width: 44px; height: 24px; flex: none; }
+  .sw input { opacity: 0; width: 0; height: 0; }
+  .sw span { position: absolute; inset: 0; background: #3a444f; border-radius: 12px; cursor: pointer; transition: .2s; }
+  .sw span::before { content: ""; position: absolute; width: 18px; height: 18px; left: 3px; top: 3px;
+                     background: #b0bac4; border-radius: 50%; transition: .2s; }
+  .sw input:checked + span { background: #00979d88; }
+  .sw input:checked + span::before { transform: translateX(20px); background: var(--accent); }
+  input[type=range] { accent-color: var(--accent); flex: 1; }
+  .hidden { display: none !important; }
+  .kv { display: grid; grid-template-columns: 110px 1fr; gap: 4px 10px; }
+  .kv div:nth-child(odd) { color: var(--muted); }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  td, th { padding: 5px 6px; text-align: left; border-bottom: 1px solid var(--card2); }
+  th { color: var(--muted); font-weight: 500; }
+  td.num { font-family: ui-monospace, Consolas, monospace; }
+  .net { display: flex; justify-content: space-between; align-items: center; padding: 6px 0;
+         border-bottom: 1px solid var(--card2); cursor: pointer; }
+  #term { background: var(--term); border-radius: 12px; padding: 12px; height: 62vh; overflow: auto;
+          font: 13px/1.45 ui-monospace, Consolas, "Courier New", monospace; white-space: pre-wrap; word-break: break-all; }
+  #term .cmd { color: #7fdbca; } #term .err { color: #ff8a80; } #term .info { color: var(--muted); }
+  .termin { display: flex; gap: 8px; margin-top: 10px; }
+  .termin input { flex: 1; font-family: ui-monospace, Consolas, monospace; }
+  #toast { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); background: var(--card2);
+           padding: 10px 16px; border-radius: 10px; opacity: 0; transition: opacity .3s; pointer-events: none; }
+  #toast.show { opacity: 1; }
+  .lock { text-align: center; padding: 30px 10px; }
+  .lock input { width: 180px; text-align: center; letter-spacing: 3px; }
+  @media (max-width: 600px) { header { padding: 12px 16px; } .wrap { padding: 12px 16px; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>UNO Q Remote</h1>
+  <div class="tabs">
+    <button class="tab on" data-tab="pins">Pins</button>
+    <button class="tab" data-tab="system">System</button>
+    <button class="tab" data-tab="terminal">Terminal</button>
+  </div>
+  <div class="conn">
+    <span class="dot" id="dot"></span>
+    <input id="host" placeholder="Board IP" size="14">
+    <button class="b p" id="connect">Connect</button>
+  </div>
+</header>
+
+<div class="wrap">
+  <!-- ============ PINS ============ -->
+  <section id="tab-pins">
+    <p class="muted" id="pinsStatus">Pins come from the UNO Q Remote App Lab app (port 7000).</p>
+    <div class="grid">
+      <div class="card"><h2>Built-in RGB LEDs</h2><div id="leds"></div></div>
+      <div class="card"><h2>PWM outputs (0–255)</h2><div id="pwm"></div></div>
+      <div class="card"><h2>Analog inputs</h2><div id="analog"></div></div>
+      <div class="card"><h2>Digital pins</h2>
+        <p class="muted" style="margin-top:-4px">Click the mode to switch IN / OUT / PULL-UP.</p>
+        <div id="digital"></div></div>
+    </div>
+  </section>
+
+  <!-- ============ SYSTEM ============ -->
+  <section id="tab-system" class="hidden">
+    <div class="card lock hidden" id="lockSystem"></div>
+    <div id="systemBody" class="hidden">
+      <div class="grid">
+        <div class="card"><h2>Overview</h2><div class="kv" id="info"></div></div>
+        <div class="card"><h2>Usage</h2>
+          <div class="row"><span class="name">CPU</span><div class="bar"><i id="cpuBar"></i></div><span class="val" id="cpuVal"></span></div>
+          <div class="row"><span class="name">RAM</span><div class="bar"><i id="memBar"></i></div><span class="val" id="memVal"></span></div>
+          <div class="row"><span class="name">Disk</span><div class="bar"><i id="diskBar"></i></div><span class="val" id="diskVal"></span></div>
+          <div class="row"><span class="name">Temp</span><span id="tempVal"></span></div>
+          <h2 style="margin-top:14px">Power</h2>
+          <div class="row"><button class="b" id="reboot">Reboot</button><button class="b danger" id="shutdown">Shut down</button></div>
+        </div>
+        <div class="card"><h2>Wi-Fi</h2>
+          <div class="row"><span class="grow muted" id="wifiNow">—</span><button class="b" id="scan">Scan</button></div>
+          <div id="nets"></div></div>
+      </div>
+      <div class="card" style="margin-top:14px">
+        <div class="row"><h2 class="grow" style="margin:0">Processes</h2><button class="b" id="procRefresh">Refresh</button></div>
+        <table><thead><tr><th>PID</th><th>Name</th><th>User</th><th>CPU%</th><th>MEM%</th><th></th></tr></thead>
+          <tbody id="procs"></tbody></table>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ TERMINAL ============ -->
+  <section id="tab-terminal" class="hidden">
+    <div class="card lock hidden" id="lockTerminal"></div>
+    <div id="terminalBody" class="hidden">
+      <div id="term"><span class="info">Commands run on the UNO Q's Linux system. Interactive programs (nano, top, sudo password prompts) are not supported - use e.g. "top -bn1".
+Press ↑/↓ for history.
+</span></div>
+      <div class="termin">
+        <input id="cmd" placeholder="Type a command and press Enter" autocomplete="off" autocapitalize="off" spellcheck="false">
+        <button class="b p" id="run">Run</button><button class="b" id="clear">Clear</button>
+      </div>
+    </div>
+  </section>
+</div>
+<div id="toast"></div>
+
+<script>
+const $ = (s) => document.querySelector(s);
+const DIGITAL = Array.from({length: 14}, (_, i) => "D" + i);
+const ANALOG = ["A0", "A1", "A2", "A3", "A4", "A5"];
+const PWM = ["D3", "D5", "D6", "D9", "D10", "D11"];
+const MODES = ["input", "output", "input_pullup"], MODE_LABEL = {output: "OUT", input: "IN", input_pullup: "PULL-UP"};
+
+const store = {
+  get(k, d) { try { return localStorage.getItem(k) ?? d; } catch { return d; } },
+  set(k, v) { try { localStorage.setItem(k, v); } catch {} },
+};
+let host = store.get("host", location.hostname || "");
+let pin = store.get("pin", "");
+let pinsOk = false, agentOk = false, tab = "pins";
+const modes = {}, out = {}, leds = {3: [0, 0, 0], 4: [0, 0, 0]};
+DIGITAL.forEach(p => modes[p] = "input");
+
+const pinsBase = () => location.port === "7000" && location.hostname === host ? "" : `http://${host}:7000`;
+const agentBase = () => location.port === "7001" && location.hostname === host ? "" : `http://${host}:7001`;
+
+function toast(msg) { const t = $("#toast"); t.textContent = msg; t.classList.add("show");
+  clearTimeout(toast.t); toast.t = setTimeout(() => t.classList.remove("show"), 2600); }
+
+async function pinsApi(path, params = {}) {
+  const q = new URLSearchParams(params).toString();
+  const r = await fetch(pinsBase() + path + (q ? "?" + q : ""), {cache: "no-store"});
+  const j = await r.json();
+  if (j.ok === false) throw new Error(j.error || "board error");
+  return j;
+}
+async function agentApi(path, body) {
+  const opt = {headers: {"X-Pin": pin}, cache: "no-store"};
+  if (body) { opt.method = "POST"; opt.body = JSON.stringify(body); opt.headers["Content-Type"] = "application/json"; }
+  const r = await fetch(agentBase() + path, opt);
+  const j = await r.json();
+  if (r.status === 401) { agentOk = false; showLocks(); throw new Error("wrong PIN"); }
+  if (j.ok === false) throw new Error(j.error || "agent error");
+  return j;
+}
+
+// ---------------------------------------------------------------- build pins UI
+function sw(onChange) {
+  const l = document.createElement("label"); l.className = "sw";
+  l.innerHTML = '<input type="checkbox"><span></span>';
+  l.querySelector("input").addEventListener("change", e => onChange(e.target.checked));
+  return l;
+}
+for (const n of [3, 4]) {
+  const row = document.createElement("div"); row.className = "row";
+  row.innerHTML = `<span class="name">LED${n}</span>`;
+  ["r", "g", "bl"].forEach((c, i) => {
+    const b = document.createElement("button"); b.className = `b led ${c}`; b.textContent = "RGB"[i];
+    b.id = `led${n}${i}`;
+    b.onclick = () => { leds[n][i] ^= 1; paintLeds(); sendLed(n); };
+    row.appendChild(b);
+  });
+  const off = document.createElement("button"); off.className = "b"; off.textContent = "Off";
+  off.onclick = () => { leds[n] = [0, 0, 0]; paintLeds(); sendLed(n); };
+  row.appendChild(off); $("#leds").appendChild(row);
+}
+function paintLeds() { for (const n of [3, 4]) for (let i = 0; i < 3; i++) $(`#led${n}${i}`).classList.toggle("on", !!leds[n][i]); }
+function sendLed(n) { const [r, g, b] = leds[n]; pinsApi("/api/led", {led: n, r, g, b}).catch(e => toast("LED: " + e.message)); }
+
+const pwmLast = {};
+for (const p of PWM) {
+  const row = document.createElement("div"); row.className = "row";
+  row.innerHTML = `<span class="name">${p}</span><input type="range" min="0" max="255" value="0" id="pwm${p}"><span class="val" id="pwmv${p}">0</span>`;
+  $("#pwm").appendChild(row);
+  const r = row.querySelector("input");
+  const send = () => { pwmLast[p] = Date.now(); setMode(p, "output", true);
+    pinsApi("/api/pwm", {pin: p, value: r.value}).catch(e => toast("PWM: " + e.message)); };
+  r.addEventListener("input", () => { $(`#pwmv${p}`).textContent = r.value; if (Date.now() - (pwmLast[p] || 0) > 100) send(); });
+  r.addEventListener("change", send);
+}
+for (const p of ANALOG) {
+  const row = document.createElement("div"); row.className = "row";
+  row.innerHTML = `<span class="name">${p}</span><div class="bar"><i id="ab${p}"></i></div><span class="val" id="av${p}">—</span>`;
+  $("#analog").appendChild(row);
+}
+for (const p of DIGITAL) {
+  const row = document.createElement("div"); row.className = "row";
+  row.innerHTML = `<span class="name">${p}</span><button class="b mode" id="m${p}" style="width:90px">IN</button><span class="grow"></span><span class="val" id="dv${p}">—</span>`;
+  const s = sw(on => { out[p] = on ? 1 : 0; paintDigital(p);
+    pinsApi("/api/digital/write", {pin: p, value: on ? 1 : 0}).catch(e => toast(p + ": " + e.message)); });
+  s.id = `sw${p}`; row.appendChild(s); $("#digital").appendChild(row);
+  row.querySelector("button").onclick = () => {
+    const next = MODES[(MODES.indexOf(modes[p]) + 1) % 3]; setMode(p, next);
+    pinsApi("/api/mode", {pin: p, mode: next}).catch(e => toast(p + ": " + e.message));
+  };
+}
+function setMode(p, m, localOnly) { if (!(p in modes)) return; modes[p] = m; paintDigital(p); }
+function paintDigital(p) {
+  const isOut = modes[p] === "output", b = $(`#m${p}`), v = $(`#dv${p}`);
+  b.textContent = MODE_LABEL[modes[p]]; b.classList.toggle("out", isOut);
+  $(`#sw${p}`).style.visibility = isOut ? "visible" : "hidden";
+  $(`#sw${p} input`).checked = !!out[p];
+  if (isOut) { v.textContent = out[p] ? "HIGH" : "LOW"; v.style.color = out[p] ? "var(--ok)" : "var(--muted)"; }
+}
+DIGITAL.forEach(paintDigital);
+
+function applyState(st) {
+  for (const p of DIGITAL) { modes[p] = st.modes?.[p] || "input"; out[p] = st.out?.[p] || 0; paintDigital(p); }
+  for (const p of PWM) { const v = st.pwm?.[p] || 0; $(`#pwm${p}`).value = v; $(`#pwmv${p}`).textContent = v; }
+  for (const n of [3, 4]) if (st["led" + n]) leds[n] = st["led" + n];
+  paintLeds();
+}
+
+// ---------------------------------------------------------------- connect & polling
+async function connect() {
+  host = $("#host").value.trim() || location.hostname; store.set("host", host);
+  pinsOk = false; agentOk = false;
+  try {
+    const info = await pinsApi("/api/info");
+    if (info.app !== "unoq-remote") throw new Error("not UNO Q Remote");
+    applyState((await pinsApi("/api/status")).state); pinsOk = true;
+    $("#pinsStatus").textContent = `Connected to the App Lab app on ${host}:7000.`;
+  } catch (e) { $("#pinsStatus").textContent = `Pins unavailable (${e.message}). Is the UNO Q Remote App Lab app running?`; }
+  if (pin) { try { await agentApi("/api/auth"); agentOk = true; } catch {} }
+  updateDot(); showLocks(); refreshTab();
+}
+function updateDot() { $("#dot").style.background = pinsOk || agentOk ? "var(--ok)" : "var(--bad)"; }
+
+async function pollPins() {
+  if (!pinsOk || tab !== "pins") return;
+  try {
+    const a = (await pinsApi("/api/analog/all")).values;
+    for (const p of ANALOG) { const v = a[p]; if (v == null || v < 0) continue;
+      const max = v > 4095 ? 65535 : v > 1023 ? 4095 : 1023;
+      $(`#ab${p}`).style.width = (100 * v / max) + "%"; $(`#av${p}`).textContent = v; }
+    if (DIGITAL.some(p => modes[p] !== "output")) {
+      const d = (await pinsApi("/api/digital/all")).values;
+      for (const p of DIGITAL) if (modes[p] !== "output") { const v = $(`#dv${p}`);
+        v.textContent = d[p] === 1 ? "HIGH" : d[p] === 0 ? "LOW" : "—"; v.style.color = d[p] === 1 ? "var(--ok)" : "var(--muted)"; }
+    }
+  } catch (e) { $("#pinsStatus").textContent = "Lost contact: " + e.message; }
+}
+setInterval(pollPins, 700);
+
+// ---------------------------------------------------------------- PIN lock
+function showLocks() {
+  for (const name of ["System", "Terminal"]) {
+    const lock = $("#lock" + name), body = $("#" + name.toLowerCase() + "Body");
+    lock.classList.toggle("hidden", agentOk); body.classList.toggle("hidden", !agentOk);
+    if (!agentOk) lock.innerHTML = `<h2>Unlock the board's system controls</h2>
+      <p class="muted">Enter the PIN shown when you installed the UNO Q Remote agent (port 7001).</p>
+      <div class="row" style="justify-content:center"><input type="password" inputmode="numeric" placeholder="PIN" id="pin${name}">
+      <button class="b p" id="unlock${name}">Unlock</button></div><p class="muted" id="lockMsg${name}"></p>`;
+    if (!agentOk) {
+      const go = async () => { pin = $("#pin" + name).value.trim();
+        $("#lockMsg" + name).textContent = "Checking…";
+        try { await agentApi("/api/auth"); agentOk = true; store.set("pin", pin); updateDot(); showLocks(); refreshTab(); }
+        catch (e) { $("#lockMsg" + name).textContent = e.message === "wrong PIN" ? "Wrong PIN." :
+          `Can't reach the agent on ${host}:7001 (${e.message}). Is it installed?`; } };
+      $("#unlock" + name).onclick = go;
+      $("#pin" + name).onkeydown = e => { if (e.key === "Enter") go(); };
+    }
+  }
+}
+
+// ---------------------------------------------------------------- system
+const fmtBytes = b => b > 1e9 ? (b / 1e9).toFixed(1) + " GB" : (b / 1e6).toFixed(0) + " MB";
+const fmtUp = s => { const d = Math.floor(s / 86400), h = Math.floor(s % 86400 / 3600), m = Math.floor(s % 3600 / 60);
+  return (d ? d + "d " : "") + h + "h " + m + "m"; };
+async function loadInfo() {
+  if (!agentOk || tab !== "system") return;
+  try {
+    const i = await agentApi("/api/os/info");
+    $("#info").innerHTML = [["Hostname", i.hostname], ["System", i.os], ["Kernel", i.kernel], ["Uptime", fmtUp(i.uptime)],
+      ["CPUs", `${i.cpus} (load ${i.load.map(x => x.toFixed(2)).join(" ")})`],
+      ["Addresses", i.ips.map(a => `${a.ip} (${a.iface})`).join("<br>") || "—"], ["Agent user", i.user]]
+      .map(([k, v]) => `<div>${k}</div><div>${v}</div>`).join("");
+    $("#cpuBar").style.width = i.cpu + "%"; $("#cpuVal").textContent = i.cpu + "%";
+    $("#memBar").style.width = (100 * i.mem.used / i.mem.total) + "%"; $("#memVal").textContent = fmtBytes(i.mem.used);
+    $("#diskBar").style.width = (100 * i.disk.used / i.disk.total) + "%"; $("#diskVal").textContent = fmtBytes(i.disk.used);
+    $("#tempVal").textContent = i.temp == null ? "—" : i.temp + " °C";
+    $("#wifiNow").textContent = i.wifi ? "Connected to " + i.wifi : "Not connected to Wi-Fi";
+  } catch (e) { toast("System: " + e.message); }
+}
+setInterval(loadInfo, 3000);
+async function loadProcs() {
+  try {
+    const ps = (await agentApi("/api/os/processes")).processes.slice(0, 25);
+    $("#procs").innerHTML = ps.map(p => `<tr><td class="num">${p.pid}</td><td>${esc(p.name)}</td><td>${esc(p.user)}</td>
+      <td class="num">${p.cpu}</td><td class="num">${p.mem}</td><td><button class="b" data-pid="${p.pid}" data-name="${esc(p.name)}">Stop</button></td></tr>`).join("");
+  } catch (e) { toast("Processes: " + e.message); }
+}
+$("#procs").onclick = async e => {
+  const b = e.target.closest("button[data-pid]"); if (!b) return;
+  if (!confirm(`Stop ${b.dataset.name} (PID ${b.dataset.pid})?`)) return;
+  try { await agentApi("/api/os/kill", {pid: +b.dataset.pid}); toast("Stopped " + b.dataset.name); }
+  catch (err) { if (confirm(`Couldn't stop it (${err.message}). Force kill?`)) {
+    try { await agentApi("/api/os/kill", {pid: +b.dataset.pid, force: true}); toast("Killed"); } catch (e2) { toast(e2.message); } } }
+  setTimeout(loadProcs, 500);
+};
+$("#procRefresh").onclick = loadProcs;
+$("#scan").onclick = async () => {
+  $("#nets").innerHTML = '<p class="muted">Scanning…</p>';
+  try {
+    const nets = (await agentApi("/api/os/wifi/scan")).networks;
+    $("#nets").innerHTML = nets.map(n => `<div class="net" data-ssid="${esc(n.ssid)}" data-secure="${n.secure}">
+      <span>${n.active ? "✔ " : ""}${esc(n.ssid)} ${n.secure ? "🔒" : ""}</span><span class="muted">${n.signal}%</span></div>`).join("")
+      || '<p class="muted">No networks found.</p>';
+  } catch (e) { $("#nets").innerHTML = `<p class="muted">${esc(e.message)}</p>`; }
+};
+$("#nets").onclick = async e => {
+  const n = e.target.closest(".net"); if (!n) return;
+  const ssid = n.dataset.ssid; let password = "";
+  if (n.dataset.secure === "true") { password = prompt(`Password for "${ssid}"`); if (password == null) return; }
+  toast("Connecting to " + ssid + "…");
+  try { await agentApi("/api/os/wifi/connect", {ssid, password}); toast("Connected to " + ssid); loadInfo(); }
+  catch (err) { toast("Wi-Fi: " + err.message); }
+};
+$("#reboot").onclick = async () => { if (confirm("Reboot the UNO Q?")) try { await agentApi("/api/os/power", {action: "reboot"}); toast("Rebooting…"); } catch (e) { toast(e.message); } };
+$("#shutdown").onclick = async () => { if (confirm("Shut down the UNO Q? You'll need to unplug and replug it to start it again.")) try { await agentApi("/api/os/power", {action: "shutdown"}); toast("Shutting down…"); } catch (e) { toast(e.message); } };
+
+// ---------------------------------------------------------------- terminal
+let cwd = store.get("cwd", ""), prompt = "board", hist = [], hi = 0, busy = false;
+function esc(s) { return String(s).replace(/[&<>"']/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[c])); }
+function termAdd(html) { const t = $("#term"); t.insertAdjacentHTML("beforeend", html); t.scrollTop = t.scrollHeight; }
+async function runCmd() {
+  const c = $("#cmd").value; if (!c.trim() || busy) return;
+  if (c.trim() === "clear") { $("#term").innerHTML = ""; $("#cmd").value = ""; return; }
+  hist.push(c); hi = hist.length; $("#cmd").value = ""; busy = true;
+  termAdd(`<span class="cmd">${esc(prompt)}:${esc(cwd || "~")}$ ${esc(c)}</span>\n`);
+  try {
+    const r = await agentApi("/api/term/exec", {cmd: c, cwd, timeout: 60});
+    cwd = r.cwd; prompt = r.prompt; store.set("cwd", cwd);
+    if (r.output) termAdd(`<span class="${r.code ? "err" : ""}">${esc(r.output)}</span>\n`);
+  } catch (e) { termAdd(`<span class="err">${esc(e.message)}</span>\n`); }
+  busy = false; $("#cmd").focus();
+}
+$("#run").onclick = runCmd; $("#clear").onclick = () => $("#term").innerHTML = "";
+$("#cmd").onkeydown = e => {
+  if (e.key === "Enter") runCmd();
+  else if (e.key === "ArrowUp" && hi > 0) { $("#cmd").value = hist[--hi]; e.preventDefault(); }
+  else if (e.key === "ArrowDown") { hi = Math.min(hist.length, hi + 1); $("#cmd").value = hist[hi] || ""; e.preventDefault(); }
+};
+
+// ---------------------------------------------------------------- tabs
+function refreshTab() { if (tab === "system" && agentOk) { loadInfo(); loadProcs(); } if (tab === "terminal" && agentOk) $("#cmd").focus(); }
+document.querySelectorAll(".tab").forEach(b => b.onclick = () => {
+  tab = b.dataset.tab;
+  document.querySelectorAll(".tab").forEach(x => x.classList.toggle("on", x === b));
+  for (const t of ["pins", "system", "terminal"]) $("#tab-" + t).classList.toggle("hidden", t !== tab);
+  refreshTab();
+});
+$("#host").value = host; $("#connect").onclick = connect;
+$("#host").onkeydown = e => { if (e.key === "Enter") connect(); };
+if (host) connect(); else showLocks();
+</script>
+</body>
+</html>

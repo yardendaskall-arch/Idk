@@ -17,6 +17,7 @@ import android.view.inputmethod.InputMethodManager;
 import android.widget.Button;
 import android.widget.CompoundButton;
 import android.widget.EditText;
+import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.ProgressBar;
 import android.widget.ScrollView;
@@ -44,21 +45,21 @@ import java.util.concurrent.atomic.AtomicInteger;
 public class MainActivity extends Activity {
 
     // ---- palette ----
-    private static final int BG = 0xFF101418;
-    private static final int CARD = 0xFF1B2128;
-    private static final int CARD_2 = 0xFF242C35;
-    private static final int TEXT = 0xFFE8EDF2;
-    private static final int MUTED = 0xFF8A96A3;
-    private static final int ACCENT = 0xFF00979D;   // Arduino teal
-    private static final int OK = 0xFF2ECC71;
-    private static final int BAD = 0xFFE74C3C;
+    static final int BG = 0xFF101418;
+    static final int CARD = 0xFF1B2128;
+    static final int CARD_2 = 0xFF242C35;
+    static final int TEXT = 0xFFE8EDF2;
+    static final int MUTED = 0xFF8A96A3;
+    static final int ACCENT = 0xFF00979D;   // Arduino teal
+    static final int OK = 0xFF2ECC71;
+    static final int BAD = 0xFFE74C3C;
 
     private static final String[] DIGITAL = {"D0", "D1", "D2", "D3", "D4", "D5", "D6",
             "D7", "D8", "D9", "D10", "D11", "D12", "D13"};
     private static final String[] ANALOG = {"A0", "A1", "A2", "A3", "A4", "A5"};
     private static final String[] PWM = {"D3", "D5", "D6", "D9", "D10", "D11"};
-    private static final String[] MODES = {"output", "input", "input_pullup"};
-    private static final String[] MODE_LABELS = {"OUT", "IN", "PULL-UP"};
+    private static final String[] MODES = {"input", "output", "input_pullup"};
+    private static final String[] MODE_LABELS = {"IN", "OUT", "PULL-UP"};
     private static final int POLL_MS = 600;
 
     private final Handler ui = new Handler(Looper.getMainLooper());
@@ -109,12 +110,14 @@ public class MainActivity extends Activity {
         super.onResume();
         ui.removeCallbacks(poller);
         ui.postDelayed(poller, POLL_MS);
+        agent.onTabShown(currentTab);
     }
 
     @Override
     protected void onPause() {
         super.onPause();
         ui.removeCallbacks(poller);
+        agent.stop();
     }
 
     @Override
@@ -122,11 +125,71 @@ public class MainActivity extends Activity {
         super.onDestroy();
         scanning = false;
         cmd.shutdownNow();
+        agent.shutdown();
     }
 
     // ------------------------------------------------------------------ UI building
 
+    private AgentPages agent;
+    private final View[] pages = new View[3];
+    private final Button[] tabs = new Button[3];
+    private int currentTab;
+
+    /** Host to use for the agent: the connected board, or whatever is typed in. */
+    String boardHost() {
+        if (host != null) return host;
+        String h = hostField.getText().toString().trim();
+        return h.isEmpty() ? null : h;
+    }
+
     private View buildUi() {
+        LinearLayout outer = vertical();
+        outer.setBackgroundColor(BG);
+        FrameLayout content = new FrameLayout(this);
+        outer.addView(content, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
+        agent = new AgentPages(this);
+        pages[0] = buildPinsPage();
+        pages[1] = agent.buildSystemPage();
+        pages[2] = agent.buildTerminalPage();
+        for (View v : pages) content.addView(v, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+
+        LinearLayout bar = horizontal();
+        bar.setBackgroundColor(CARD);
+        bar.setPadding(dp(8), dp(6), dp(8), dp(6));
+        String[] names = {"Pins", "System", "Terminal"};
+        for (int i = 0; i < 3; i++) {
+            final int idx = i;
+            Button b = button(names[i], CARD);
+            tabs[i] = b;
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, dp(46), 1f);
+            lp.leftMargin = lp.rightMargin = dp(4);
+            bar.addView(b, lp);
+            b.setOnClickListener(new View.OnClickListener() {
+                @Override public void onClick(View v) { showTab(idx); }
+            });
+        }
+        outer.addView(bar);
+        showTab(0);
+        return outer;
+    }
+
+    private void showTab(int i) {
+        hideKeyboard();
+        currentTab = i;
+        for (int k = 0; k < 3; k++) {
+            pages[k].setVisibility(k == i ? View.VISIBLE : View.GONE);
+            tabs[k].setBackground(round(k == i ? ACCENT : CARD, dp(8)));
+            tabs[k].setTextColor(k == i ? Color.WHITE : MUTED);
+        }
+        agent.onTabShown(i);
+    }
+
+    @Override
+    public void onBackPressed() {
+        if (currentTab != 0) showTab(0); else super.onBackPressed();
+    }
+
+    private View buildPinsPage() {
         ScrollView scroll = new ScrollView(this);
         scroll.setBackgroundColor(BG);
         scroll.setFillViewport(true);
@@ -464,7 +527,7 @@ public class MainActivity extends Activity {
 
     private void applyMode(String pin, String mode) {
         pinModes.put(pin, mode);
-        int i = 1;
+        int i = 0;
         for (int k = 0; k < MODES.length; k++) if (MODES[k].equals(mode)) i = k;
         Button b = modeButtons.get(pin);
         b.setText(MODE_LABELS[i]);
@@ -504,7 +567,7 @@ public class MainActivity extends Activity {
     private final Runnable poller = new Runnable() {
         @Override public void run() {
             ui.postDelayed(this, POLL_MS);
-            if (!connected || !live || !pollBusy.compareAndSet(false, true)) return;
+            if (!connected || !live || currentTab != 0 || !pollBusy.compareAndSet(false, true)) return;
             final List<String> inputs = new ArrayList<>();
             for (String p : DIGITAL) if (!"output".equals(pinModes.get(p))) inputs.add(p);
             cmd.execute(new Runnable() {
@@ -657,26 +720,26 @@ public class MainActivity extends Activity {
         setStatus(msg, good ? OK : BAD);
     }
 
-    private void hideKeyboard() {
+    void hideKeyboard() {
         InputMethodManager imm = (InputMethodManager) getSystemService(INPUT_METHOD_SERVICE);
         if (imm != null && getCurrentFocus() != null) imm.hideSoftInputFromWindow(getCurrentFocus().getWindowToken(), 0);
     }
 
-    private int dp(int v) { return Math.round(v * getResources().getDisplayMetrics().density); }
+    int dp(int v) { return Math.round(v * getResources().getDisplayMetrics().density); }
 
-    private LinearLayout vertical() {
+    LinearLayout vertical() {
         LinearLayout l = new LinearLayout(this);
         l.setOrientation(LinearLayout.VERTICAL);
         return l;
     }
 
-    private LinearLayout horizontal() {
+    LinearLayout horizontal() {
         LinearLayout l = new LinearLayout(this);
         l.setOrientation(LinearLayout.HORIZONTAL);
         return l;
     }
 
-    private LinearLayout card(String title) {
+    LinearLayout card(String title) {
         LinearLayout c = vertical();
         c.setBackground(round(CARD, dp(14)));
         c.setPadding(dp(14), dp(12), dp(14), dp(14));
@@ -690,7 +753,7 @@ public class MainActivity extends Activity {
         return c;
     }
 
-    private TextView text(String s, int sp, int color) {
+    TextView text(String s, int sp, int color) {
         TextView t = new TextView(this);
         t.setText(s);
         t.setTextSize(sp);
@@ -698,7 +761,7 @@ public class MainActivity extends Activity {
         return t;
     }
 
-    private Button button(String label, int bg) {
+    Button button(String label, int bg) {
         Button b = new Button(this);
         b.setText(label);
         b.setAllCaps(false);
@@ -710,7 +773,7 @@ public class MainActivity extends Activity {
         return b;
     }
 
-    private EditText input(String value, String hint, int type) {
+    EditText input(String value, String hint, int type) {
         EditText e = new EditText(this);
         e.setText(value);
         e.setHint(hint);
@@ -731,7 +794,7 @@ public class MainActivity extends Activity {
         return s;
     }
 
-    private static GradientDrawable round(int color, int radius) {
+    static GradientDrawable round(int color, int radius) {
         GradientDrawable d = new GradientDrawable();
         d.setColor(color);
         d.setCornerRadius(radius);

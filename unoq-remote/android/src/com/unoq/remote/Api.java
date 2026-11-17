@@ -36,6 +36,45 @@ final class Api {
         }
     }
 
+    static final int AGENT_PORT = 7001;
+
+    /** Thrown when the host agent rejects the PIN. */
+    static final class WrongPin extends Exception {
+        WrongPin() { super("wrong PIN"); }
+    }
+
+    /** Call the host agent (port 7001). body == null means GET, otherwise POST JSON. */
+    static JSONObject agent(String host, String path, String pin, JSONObject body, int timeoutMs) throws Exception {
+        if (host == null) throw new Exception("enter the board's address on the Pins tab first");
+        HttpURLConnection c = (HttpURLConnection) new URL("http://" + host + ":" + AGENT_PORT + path).openConnection();
+        c.setConnectTimeout(4000);
+        c.setReadTimeout(timeoutMs);
+        c.setUseCaches(false);
+        c.setRequestProperty("X-Pin", pin == null ? "" : pin);
+        try {
+            if (body != null) {
+                byte[] data = body.toString().getBytes("UTF-8");
+                c.setRequestMethod("POST");
+                c.setDoOutput(true);
+                c.setRequestProperty("Content-Type", "application/json");
+                c.setFixedLengthStreamingMode(data.length);
+                c.getOutputStream().write(data);
+            }
+            int code = c.getResponseCode();
+            if (code == 401) throw new WrongPin();
+            InputStream in = code >= 400 ? c.getErrorStream() : c.getInputStream();
+            String text = in == null ? "" : readAll(in);
+            if (code >= 400 && text.isEmpty()) throw new Exception("HTTP " + code);
+            JSONObject json = new JSONObject(text);
+            if (!json.optBoolean("ok", true)) throw new Exception(json.optString("error", "agent error"));
+            return json;
+        } catch (java.net.ConnectException e) {
+            throw new Exception("can't reach the agent on " + host + ":" + AGENT_PORT + " - is it installed?");
+        } finally {
+            c.disconnect();
+        }
+    }
+
     private static String readAll(InputStream in) throws Exception {
         ByteArrayOutputStream out = new ByteArrayOutputStream();
         byte[] buf = new byte[4096];

@@ -1,59 +1,117 @@
 # UNO Q Remote
 
-An Android app that controls an **Arduino UNO Q** over Wi-Fi.
+Control an **Arduino UNO Q** from an Android phone or from any web browser:
+its pins and LEDs, its Linux system, and a terminal.
 
 ```
-Phone (UnoQRemote.apk) ──HTTP :7000──▶ UNO Q Linux side (python/main.py) ──Bridge──▶ STM32 MCU (sketch.ino)
+                         ┌─ port 7000: App Lab app (python/main.py) ──Bridge──▶ MCU sketch  →  pins & LEDs
+Phone app / web browser ─┤
+                         └─ port 7001: host agent (unoq_agent.py, needs PIN) →  system info, Wi-Fi,
+                                                                                 processes, reboot, terminal
 ```
 
-## What you can control
+There are two parts on the board:
 
-- **Built-in RGB LEDs** LED3 and LED4 (turn red, green and blue on or off)
-- **Digital pins D0–D13**: set each one to output, input, or input with pull-up; switch outputs HIGH/LOW; read inputs live
-- **PWM** on D3, D5, D6, D9, D10, D11 with sliders (0–255)
-- **Analog inputs A0–A5**, read live
+| Part | What it does | Why it's separate |
+| --- | --- | --- |
+| **App Lab app** (`arduino-app/`) | Pins, PWM, analog readings, RGB LEDs, and the web panel on port 7000 | Only App Lab apps can talk to the microcontroller |
+| **Host agent** (`host-agent/`) | System info, Wi-Fi, processes, reboot/shutdown, terminal on port 7001 | App Lab apps run inside a sandboxed container, so they can't reach the real Linux system |
 
-## 1. Put the app on the board
+## Phone app tabs
 
-1. Open **Arduino App Lab** and connect to your UNO Q.
-2. Create a new app called `UNO Q Remote`.
-3. Copy the files from `arduino-app/` into it:
-   - `app.yaml` (adds the **WebUI - HTML** brick, which runs the web server on port 7000)
-   - `python/main.py`
-   - `sketch/sketch.ino` and `sketch/sketch.yaml`
-4. Press **Run**. Make sure the board is connected to the **same Wi-Fi network** as your phone.
+- **Pins**: built-in RGB LEDs (LED3, LED4), D0–D13 (IN / OUT / PULL-UP, on/off, live input readings), PWM sliders on D3/D5/D6/D9/D10/D11, live analog A0–A5.
+- **System**: hostname, OS, uptime, CPU / RAM / disk use, temperature, IP addresses, Wi-Fi scan and connect, process list with Stop, Reboot, Shut down.
+- **Terminal**: run commands on the board's Linux. It keeps track of `cd`, has history (↑ ↓) and shortcut keys.
 
-## 2. Install the APK on your phone
+The web panel has the same three tabs.
 
-1. Copy `UnoQRemote.apk` to your phone, or download it from GitHub.
-2. Open it. Android will ask you to allow installs from that source. Allow it, then install.
-   (Play Protect may warn about an unknown app. Choose *Install anyway*.)
+---
 
-## 3. Connect
+## 1. App Lab app (pins + web panel)
 
-- Tap **Find board** to scan your Wi-Fi network for the UNO Q, or
-- type the board's IP address (App Lab shows it, and so does your router), keep port `7000`, and tap **Connect**.
+In Arduino App Lab, create an app and add the **WebUI - HTML** brick. Then replace these files with the ones from `arduino-app/`:
 
-The app remembers the address for next time.
+- `python/main.py`
+- `sketch/sketch.ino`
+- `assets/index.html` (the web panel)
 
-## The HTTP API
+Press **Run**. Opening `http://<board>:7000` now shows the control panel.
 
-You can also call it from a browser or script, for example `http://<board-ip>:7000/api/led?led=3&r=1`.
+## 2. Host agent (system + terminal), installed once
+
+You need a command line on the board's Linux. On a PC that's connected to the board by USB, you can use **adb**:
+
+1. Download Android **SDK Platform-Tools** for your PC from developer.android.com/tools/releases/platform-tools and unzip it.
+2. Put `host-agent/unoq_agent.py` and `host-agent/index.html` into that `platform-tools` folder.
+3. Open a command prompt in that folder and run:
+   ```
+   adb devices
+   adb push unoq_agent.py index.html /tmp/
+   adb shell
+   ```
+   You're now on the board. Run:
+   ```
+   python3 /tmp/unoq_agent.py --install
+   ```
+   If it asks for a password, it's the board password you chose when setting up the UNO Q in App Lab.
+4. It prints a **PIN**. Write it down. You need it in the app and the web panel.
+
+The agent starts automatically every time the board boots. It needs nothing from the internet.
+
+- Show the PIN again (inside `adb shell`): `sudo python3 /opt/unoq-agent/unoq_agent.py --pin`
+- Remove the agent: `sudo python3 /opt/unoq-agent/unoq_agent.py --uninstall`
+
+## 3. Get the board onto Wi-Fi (if it isn't)
+
+You can do this from the PC over USB using the new web panel:
+
+```
+adb forward tcp:7001 tcp:7001
+```
+
+Then open **http://localhost:7001** in the PC's browser. Go to **System**, enter the PIN, tap **Scan** under Wi-Fi, and pick your network (home Wi-Fi, or your phone's hotspot). The board doesn't need internet. It only needs to be on the same network as your phone.
+
+## 4. Phone
+
+Install `UnoQRemote.apk`. On the **Pins** tab, tap **Find board**, or type the board's IP and tap **Connect**. Open **System** or **Terminal** and enter the PIN once. The app remembers it.
+
+From a computer on the same network, open `http://<board-ip>:7000` (or `:7001`).
+
+---
+
+## Security
+
+- The pin controls on port 7000 have no password. Anyone on your network can switch pins.
+- Everything on port 7001 (system, terminal) needs the 8-digit PIN. A wrong guess is delayed by one second, so the PIN can't be guessed quickly.
+- The agent runs as the board's normal user (`arduino`), not root. The installer only lets it reboot, shut down and stop processes without a password. For other `sudo` commands in the terminal, use `echo YOURPASSWORD | sudo -S command`.
+- Traffic isn't encrypted. Only use this on networks you trust.
+
+## HTTP API
+
+**Port 7000 (pins).** Every endpoint is a GET with query parameters, for example `http://<board>:7000/api/led?led=3&r=1`.
 
 | Endpoint | Parameters |
 | --- | --- |
-| `/api/info` | none |
-| `/api/status` | none |
+| `/api/info`, `/api/status` | none |
 | `/api/mode` | `pin` (D0–D13, A0–A5), `mode` = `output` / `input` / `input_pullup` |
 | `/api/digital/write` | `pin`, `value` 0/1 |
-| `/api/digital/read` | `pin` |
-| `/api/digital/all` | none |
+| `/api/digital/read`, `/api/digital/all` | `pin` (read only) |
 | `/api/pwm` | `pin` (D3, D5, D6, D9, D10, D11), `value` 0–255 |
-| `/api/analog/read` | `pin` (A0–A5) |
-| `/api/analog/all` | none |
+| `/api/analog/read`, `/api/analog/all` | `pin` (A0–A5, read only) |
 | `/api/led` | `led` 3 or 4, `r`, `g`, `b` 0/1 |
 
-Every response is JSON with `"ok": true` or `"ok": false, "error": "..."`.
+**Port 7001 (agent).** Send the header `X-Pin: <PIN>`. POST bodies are JSON.
+
+| Endpoint | Method | Body / result |
+| --- | --- | --- |
+| `/api/ping` | GET | no PIN needed |
+| `/api/os/info` | GET | hostname, OS, uptime, CPU, memory, disk, temperature, IPs, Wi-Fi |
+| `/api/os/processes` | GET | top processes by CPU |
+| `/api/os/kill` | POST | `{"pid": 123, "force": false}` |
+| `/api/os/wifi/scan` | GET | nearby networks |
+| `/api/os/wifi/connect` | POST | `{"ssid": "...", "password": "..."}` |
+| `/api/os/power` | POST | `{"action": "reboot"}` or `"shutdown"` |
+| `/api/term/exec` | POST | `{"cmd": "ls -la", "cwd": "/home/arduino", "timeout": 60}` returns output, exit code and new cwd |
 
 ## Rebuilding the APK
 
