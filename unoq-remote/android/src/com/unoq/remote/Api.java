@@ -39,6 +39,7 @@ final class Api {
     }
 
     static final int AGENT_PORT = 7001;
+    static final String AGENT_OLD = "the agent on the board is out of date - reinstall it: adb push unoq_agent.py index.html /tmp/ then adb shell, then python3 /tmp/unoq_agent.py --install";
 
     /** Thrown when the host agent rejects the PIN. */
     static final class WrongPin extends Exception {
@@ -64,6 +65,7 @@ final class Api {
             }
             int code = c.getResponseCode();
             if (code == 401) throw new WrongPin();
+            if (code == 404) throw new Exception(AGENT_OLD);
             InputStream in = code >= 400 ? c.getErrorStream() : c.getInputStream();
             String text = in == null ? "" : readAll(in);
             if (code >= 400 && text.isEmpty()) throw new Exception("HTTP " + code);
@@ -98,6 +100,7 @@ final class Api {
             if (type == null || !type.startsWith("image/")) {
                 InputStream in = code >= 400 ? c.getErrorStream() : c.getInputStream();
                 JSONObject j = new JSONObject(in == null ? "{}" : readAll(in));
+                if (code == 404) throw new Exception(AGENT_OLD);
                 throw new Exception(j.optString("error", "no picture from the board"));
             }
             Frame f = new Frame();
